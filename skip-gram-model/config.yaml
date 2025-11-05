@@ -1,0 +1,51 @@
+project:
+  name: "Polish skip gram model with negative sampling"
+  author: "Julia Bochniarz-Paziewska"
+  description: |
+    A PyTorch implementation of a Skip-Gram model with negative sampling for Polish language word embeddings. 
+    This project provides a complete pipeline for preprocessing Polish text data, 
+    building vocabulary, and training word embeddings using the skip-gram architecture.
+
+# data settings
+data:
+  data-dir: "../../data"
+  lemmatized-data-dir: "../../lemmatized_data"
+  datasets:
+#    - "plwiki"
+#    - "news_4_business_corpus"
+#    - "news_5_lifestyle_corpus"
+    - "wolne_lektury_corpus"
+#    - "web_artykuły_inne_2"
+#    - "web_artykuły_inne_147"
+
+database:
+  db-path: "sqlite.db"
+  host: "sqlite:///"
+  batch-size: 1024
+
+# model settings
+model:
+  embedding-dim: 300
+  training:
+    batch-size: 512
+    learning-rate: 0.001
+    num-epochs: 10
+    validation-split: 0.1
+    checkpoint-dir: "../training_checkpoints"
+    early-stopping-patience: 3
+
+# vocabulary settings
+vocabulary:
+  context-size: 5
+  vocabulary-size: 10000
+  batch-size: 1024
+  words-counter-path: "../words_counter.pkl"
+  lemmatized-words-counter-path: "../lemmatized_words_counter.pkl"
+
+
+lemmatization:
+  lemmatize: true
+  lemmatizer: "pl_core_news_lg"
+
+device: "cuda"
+
