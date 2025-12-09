@@ -1,6 +1,7 @@
 dir-path: "../aac_data"
 preprocessed-dir-path: "../aac_data_preprocessed"
 dialog-dir-path: "../aac_dialogi"
+preprocessed-dialog-path: "../aac_dialogi_preprocessed"
 speakleash-datasets:
   - "plwiki"
   - "1000_novels_corpus_CLARIN-PL"
