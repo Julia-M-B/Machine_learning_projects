@@ -636,7 +636,7 @@ vulgarisms = [
 
 vulgarismis_joined = "|".join(vulgarisms)
 
-eos_regex = re.compile("(?<=[.!?])\s*(?=[A-ZŚŻŹĆŁÓĘĄ])")
+eos_regex = re.compile(r"(?<=[.!?])\s*(?=[A-ZŚŻŹĆŁÓĘĄ])")
 comma_space_regex = re.compile(r",(?!\s)")
 url_regex = re.compile(r"\b(?:https?://\S+|www\.\S+)")
 alphanumeric_regex = re.compile(r"[^a-ząćęłńóśźż0-9\s]")
@@ -646,9 +646,9 @@ multiple_a_regex = re.compile("a+")
 multiple_m_regex = re.compile("m+")
 multiple_y_regex = re.compile("y+")
 mhm_regex = re.compile("m+h+m+")
-hm_regex = re.compile("\sh+m+\s")
-hy_regex = re.compile("y+h+|\s+(hy)+h+y+")
-yy_regex = re.compile("\s+y+")
+hm_regex = re.compile(r"\sh+m+\s")
+hy_regex = re.compile(r"y+h+|\s+(hy)+h+y+")
+yy_regex = re.compile(r"\s+y+")
 hf_nesw_regex = re.compile("wieszwiecejpolub nas")
 
 
@@ -683,6 +683,8 @@ def clean(text: str):
 def preprocess_files(
     dir_path: str, preprocessed_dir_path: str, dataset_name: str, files_names: list[str]
 ):
+    dataset_path = Path(f"{preprocessed_dir_path}/{dataset_name}")
+    dataset_path.mkdir(parents=True, exist_ok=True)
     for file_name in tqdm(files_names, desc=f"Preprocessing files for {dataset_name}"):
         f_in_path = f"{dir_path}/{dataset_name}/{file_name}"
         f_out_path = f"{preprocessed_dir_path}/{dataset_name}/{file_name}"
