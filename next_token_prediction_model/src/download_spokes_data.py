@@ -1,10 +1,13 @@
 import os
+import warnings
 from pathlib import Path
 
 import pandas as pd
 import requests
 import yaml
 from tqdm import tqdm
+
+warnings.filterwarnings("ignore")
 
 
 def get_conversation_url(conversation_id: str, limit: int = 10000) -> str:
@@ -26,19 +29,18 @@ def download_conversations_transcripts(
 
 def change_xls_to_txt(file_path: str):
     df = pd.read_excel(file_path)
-    lines = "\n".join(df["Utt"].values)
+    utterances = [utt for utt in df["Utt"].values if utt and isinstance(utt, str)]
+    lines = "\n".join(utterances)
     with open(f"{file_path[:-4]}.txt", "w") as f_out:
         f_out.write(lines)
     os.remove(file_path)
 
 
 if __name__ == "__main__":
-    with open("../config.yml") as f:
+    with open("next_token_prediction_model/config.yml") as f:
         config = yaml.safe_load(f)
 
-    id_file = pd.read_excel(config["conversations-id-file"])
-
-    conversations = pd.read_excel(id_file)
+    conversations = pd.read_excel(config["conversations-id-file"])
     conversations_train = conversations[conversations["Id"].str.startswith("CBIZ")]
     conversations_test = conversations[~conversations["Id"].str.startswith("CBIZ")]
 

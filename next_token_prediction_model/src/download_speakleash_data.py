@@ -38,7 +38,7 @@ def save_quality_docs(
 
 
 if __name__ == "__main__":
-    with open("../config.yml") as f:
+    with open("next_token_prediction_model/config.yml") as f:
         config = yaml.safe_load(f)
 
     sl = Speakleash(config["dir-path"])
