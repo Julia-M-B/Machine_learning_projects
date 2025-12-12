@@ -23,7 +23,7 @@ This project implements a Skip-Gram model with negative sampling for learning Po
 
 - **Text preprocessing**: Cleaning, normalization, and optional lemmatization
 - **Vocabulary management**: Word frequency counting and index mapping
-- **Database integration**: SQLite database for efficient handling of large datasets
+- **Database integration**: PostgreSQL database for efficient handling of large datasets with concurrent access support
 - **Model training**: PyTorch-based training with checkpointing and early stopping
 - **Model evaluation**: Word similarity search and word arithmetic
 
@@ -34,6 +34,37 @@ This project implements a Skip-Gram model with negative sampling for learning Po
 ```bash
 pip install -r requirements.txt
 ```
+
+### PostgreSQL Database Setup (Docker Compose)
+
+The project uses PostgreSQL for storing training data. The easiest way to set it up is using Docker Compose:
+
+```bash
+# Start PostgreSQL container
+docker-compose up -d
+
+# Check if the container is running
+docker-compose ps
+
+# View logs
+docker-compose logs -f postgres
+
+# Stop the container
+docker-compose down
+
+# Stop and remove volumes (WARNING: deletes all data)
+docker-compose down -v
+```
+
+The Docker Compose setup creates a PostgreSQL database with:
+- **Database name**: `skipgram_db`
+- **Username**: `postgres`
+- **Password**: `password`
+- **Port**: `5432` (mapped to localhost:5432)
+
+The connection string in `config.yaml` is already configured to work with this setup. If you need to change the credentials, update both `docker-compose.yml` and `config.yaml`.
+
+**Note**: The database data is persisted in a Docker volume, so it will survive container restarts. To completely reset the database, use `docker-compose down -v`.
 
 ### Polish Language Model for spaCy
 
@@ -48,6 +79,7 @@ python -m spacy download pl_core_news_lg
 ```
 skip-gram-model/
 ├── config.yaml                 # Configuration file
+├── docker-compose.yml          # Docker Compose configuration for PostgreSQL
 ├── README.md                   # This file
 ├── src/                        # Source code
 │   ├── __init__.py
@@ -81,8 +113,10 @@ data:
 ### Database Settings
 ```yaml
 database:
-  db-path: "sqlite.db"                # SQLite database path
-  host: "sqlite:///"                  # Database host
+  # PostgreSQL connection string format: postgresql://user:password@host:port/database
+  # Example: postgresql://postgres:password@localhost:5432/skipgram_db
+  db-path: "postgresql://postgres:password@localhost:5432/skipgram_db"
+  host: ""                            # Not used for PostgreSQL (empty string)
   batch-size: 1024                    # Batch size for database operations
 ```
 
@@ -155,9 +189,13 @@ This script:
 ### 2. Prepare Training Data
 
 Before training, you need to:
-1. Create positive samples (center-context pairs) from your text
-2. Generate negative samples for negative sampling
-3. Store training examples in the SQLite database
+1. Start PostgreSQL database using Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
+2. Create positive samples (center-context pairs) from your text
+3. Generate negative samples for negative sampling
+4. Store training examples in the PostgreSQL database
 
 These steps are typically handled by separate scripts that should be run before training.
 
@@ -172,7 +210,7 @@ python skip_gram_model.py
 
 The training process:
 - Loads vocabulary from the configured counter file
-- Creates train/validation datasets from the SQLite database
+- Creates train/validation datasets from the PostgreSQL database
 - Initializes the Skip-Gram model with the specified embedding dimension
 - Trains using Adam optimizer with learning rate scheduling
 - Saves checkpoints after each epoch
@@ -257,7 +295,7 @@ The model learns semantic and syntactic relationships between Polish words, capt
 
 ## Additional Notes
 
-- The model uses SQLite for efficient data management, allowing training on datasets larger than available RAM
+- The model uses PostgreSQL for efficient data management, allowing training on datasets larger than available RAM and supporting concurrent database connections
 - Text preprocessing includes: lowercasing, removal of non-letter characters, whitespace normalization
 - The vocabulary includes an `<unk>` token (index 0) for out-of-vocabulary words
 - Training checkpoints can be used to resume training from a specific epoch

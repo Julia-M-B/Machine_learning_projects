@@ -85,7 +85,10 @@ def main():
     db_host = config["database"]["host"]
     batch_size = config["database"]["batch-size"]
 
-    engine = create_engine(f"{db_host}{db_path}", echo=False)
+    # For PostgreSQL, db_path contains the full connection string
+    # For SQLite, it would be db_host + db_path
+    connection_string = db_path if db_path.startswith("postgresql://") else f"{db_host}{db_path}"
+    engine = create_engine(connection_string, echo=False)
     Base.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine)

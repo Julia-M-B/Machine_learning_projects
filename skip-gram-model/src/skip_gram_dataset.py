@@ -10,8 +10,8 @@ from utils import CONFIG_PATH
 
 class SkipGramIterableDataset(IterableDataset):
     """
-    PyTorch IterableDataset that reads training examples from SQLite database in batches.
-    This allows handling large datasets that don't fit in RAM.
+    PyTorch IterableDataset that reads training examples from database (PostgreSQL or SQLite) in batches.
+    This allows handling large datasets that don't fit in RAM and supports concurrent connections.
     """
     
     def __init__(self, db_path: str, db_host: str, batch_size: int = 512, 
@@ -19,8 +19,10 @@ class SkipGramIterableDataset(IterableDataset):
                  is_validation: bool = False):
         """
         Args:
-            db_path: Path to SQLite database file
-            db_host: Database host (e.g., "sqlite:///")
+            db_path: Database connection string (PostgreSQL) or path (SQLite)
+                     For PostgreSQL: "postgresql://user:password@host:port/database"
+                     For SQLite: path to database file
+            db_host: Database host prefix (e.g., "sqlite:///" for SQLite, empty for PostgreSQL)
             batch_size: Number of examples to return per iteration
             shuffle: Whether to shuffle the data (note: shuffling in IterableDataset 
                     is limited - it shuffles within each batch)
@@ -39,7 +41,10 @@ class SkipGramIterableDataset(IterableDataset):
 
     def _get_session(self):    
         # Create database connection
-        engine = create_engine(f"{self.db_host}{self.db_path}", echo=False)
+        # For PostgreSQL, db_path contains the full connection string
+        # For SQLite, it would be db_host + db_path
+        connection_string = self.db_path if self.db_path.startswith("postgresql://") else f"{self.db_host}{self.db_path}"
+        engine = create_engine(connection_string, echo=False)
         Session = sessionmaker(bind=engine)
         return Session()
 
@@ -144,8 +149,8 @@ def main():
     db_host = config["database"]["host"]
 
     dataset = SkipGramIterableDataset(
-        db_path=db_path, 
-        db_host=db_host, 
+        db_path=db_path,
+        db_host=db_host,
         batch_size=512,
         shuffle=True,
         is_validation=False
