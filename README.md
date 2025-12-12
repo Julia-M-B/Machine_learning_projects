@@ -19,6 +19,18 @@ A PyTorch implementation of a Skip-Gram model with negative sampling for Polish 
 
 See the [project README](./skip-gram-model/README.md) for detailed documentation, usage instructions, and configuration options.
 
+### [Next Token Prediction Model](./next_token_prediction_model/)
+
+An LSTM-based language model for predicting the next word/token in Polish text, designed for the [PISAK 2.0 AAC application](https://github.com/Julia-M-B/pisak2.0). The model provides intelligent word suggestions to assist users with communication difficulties.
+
+**Features:**
+- Multi-layer LSTM architecture with SentencePiece tokenization
+- Training on diverse Polish corpora (Wikipedia, literature, news, conversations)
+- Text preprocessing pipeline with content filtering
+- Real-time next-token prediction optimized for AAC applications
+
+See the [project README](./next_token_prediction_model/README.md) for detailed documentation, usage instructions, and configuration options.
+
 ## Future Projects
 
 More machine learning projects will be added to this repository in the future.
