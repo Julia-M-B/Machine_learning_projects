@@ -53,10 +53,12 @@ if __name__ == "__main__":
     written_offsets_file = config["train-offsets-file"]
     train_indices_file = config["train-indices-file"]
 
+    val_indices_file = config["val-indices-file"]
     tune_indices_file = config["tune-indices-file"]
     test_indices_file = config["test-indices-file"]
 
     train_ratio = config["train-ratio"]
+    val_ratio = config["val-ratio"]
     tune_ratio = config["tune-ratio"]
 
     print("Generating indices files for 'written' datasets ...")
@@ -68,13 +70,16 @@ if __name__ == "__main__":
                                        shuffle=True)
     n_written = len(written_indices)
     n_train = int(train_ratio * n_written)
+    n_val = int(val_ratio * n_written)
     n_tune = int(tune_ratio * n_written)
 
-    train_written = written_indices[:n_written]
-    tune_written = written_indices[n_written:n_written + n_tune]
-    test_written = written_indices[n_written + n_tune:]
+    train_written = written_indices[:n_train]
+    val_written = written_indices[n_train: n_train + n_val]
+    tune_written = written_indices[n_train + n_val:n_train + n_val + n_tune]
+    test_written = written_indices[n_train + n_val + n_tune:]
 
     np.save(train_indices_file, train_written)
+    np.save(val_indices_file, val_written)
     np.save(tune_indices_file, tune_written)
     np.save(test_indices_file, test_written)
 
