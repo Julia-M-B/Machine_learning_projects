@@ -266,7 +266,7 @@ def main():
 
         # training loop (sketch)
         best_val_loss = float("inf")
-        save_path = "final_model_checkpoint.pt"
+        save_path = "model_checkpoint.pt"
         save_every = 1
         patience = 3
         epochs_without_improve = 0
