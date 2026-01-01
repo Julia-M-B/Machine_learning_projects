@@ -19,8 +19,10 @@ data:
 #    - "web_artykuły_inne_147"
 
 database:
-  db-path: "sqlite.db"
-  host: "sqlite:///"
+  # PostgreSQL connection string format: postgresql://user:password@host:port/database
+  # Example: postgresql://postgres:password@localhost:5432/skipgram_db
+  db-path: "postgresql://postgres:password@localhost:5432/skipgram_db"
+  host: ""  # Not used for PostgreSQL, connection string is in db-path
   batch-size: 1024
 
 # model settings

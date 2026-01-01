@@ -25,6 +25,7 @@ conversations-test-dir-name: "test"
 train-paths-file: "train_paths.txt"
 train-offsets-file: "train_offsets.npy"
 train-indices-file: "train_indices.npy"
+val-indices-file: "val_indices.npy"
 tune-indices-file: "tune_indices.npy"
 test-indices-file: "test_indices.npy"
 conversations-tune-paths-file: "conversations_tune_paths.txt"
@@ -34,10 +35,20 @@ conversations-test-offsets-file: "conversations_test_offsets.npy"
 conversations-tune-indices-file: "conversations_tune_indices.npy"
 conversations-test-indices-file: "conversations_test_indices.npy"
 
-train-ratio: 0.98
-tune-ratio: 0.01
+train-ratio: 0.9
+val-ratio: 0.05
+tune-ratio: 0.04
 
-vocab-size: 16000
+vocab-size: 10000
 tokenizer-type: "unigram"
 tokenizer-prefix: "spm_pl"
 tokenizer-ratio: 0.1
+
+seq-len: 32
+model-batch-size: 256
+n-workers: 4
+lr: 0.002
+n-epochs: 30
+weights-tied: true
+n-steps: 250000
+scheduler-warmup-ratio: 0.1
