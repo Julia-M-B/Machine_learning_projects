@@ -37,9 +37,9 @@ conversations-test-indices-file: "conversations_test_indices.npy"
 
 train-ratio: 0.9
 val-ratio: 0.05
-tune-ratio: 0.01
+tune-ratio: 0.04
 
-vocab-size: 16000
+vocab-size: 10000
 tokenizer-type: "unigram"
 tokenizer-prefix: "spm_pl"
 tokenizer-ratio: 0.1
