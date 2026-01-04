@@ -39,12 +39,18 @@ train-ratio: 0.9
 val-ratio: 0.05
 tune-ratio: 0.04
 
-vocab-size: 10000
+vocab-size:
+  - 8000
+  - 16000
+  - 32000
 tokenizer-type: "unigram"
-tokenizer-prefix: "spm_pl"
+tokenizer-prefix:
+  - "spm_8k"
+  - "spm_16k"
+  - "spm_32k"
 tokenizer-ratio: 0.1
 
-seq-len: 32
+seq-len: 64
 model-batch-size: 256
 n-workers: 4
 lr: 0.002

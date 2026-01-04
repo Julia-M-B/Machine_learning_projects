@@ -20,7 +20,7 @@ BINARY_OUT="model_3gram.binary"
 
 
 if [ "$#" -lt 1 ]; then
-  echo "Użycie: $0 <folder1> [folder2 ... folderN]"
+  echo "Usage: $0 <directory1> [directory2 ... directoryN]"
   exit 1
 fi
 
