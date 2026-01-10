@@ -54,7 +54,7 @@ class WordPredictionBeamSearch:
     """Efficient beam search for finding top-K most probable next words."""
 
     def __init__(self, model, tokenizer, beam_width: int = 50,
-                 max_word_length: int = 15, alpha: float = 0.0):
+                 max_word_length: int = 15, alpha: float = 0.2):
         """
         Args:
             model: LSTM model with predict() method that returns token probabilities
@@ -244,7 +244,6 @@ class WordPredictionBeamSearch:
             prob = tokens_probs[word_tokens[i]]
             log_prob += np.log(prob)
         return math.exp(log_prob / (len(word_tokens) ** self.alpha))
-        # return math.exp(log_prob)
 
     @staticmethod
     def _clean_context_text(context_text: str) -> str:
@@ -281,7 +280,6 @@ class WordPredictionBeamSearch:
         new_text = current_prefix.text + self.tokenizer.decode([token_id])
         new_log_prob = current_prefix.neg_log_prob - math.log(token_prob)
         new_log_prob_normalised = new_log_prob / (len(new_tokens) ** self.alpha)
-        # new_log_prob_normalised = new_log_prob
         return BeamItem(
             neg_log_prob_normalised=new_log_prob_normalised,
             neg_log_prob=new_log_prob,
