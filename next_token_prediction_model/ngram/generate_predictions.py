@@ -3,18 +3,35 @@ import math
 from typing import List, Tuple
 
 class KenLMPredictor:
-    def __init__(self, model_path: str, vocab_path: str = None, vocab_list: List[str] = None):
-        self.model = kenlm.Model(model_path)
+    def __init__(self, model_name: str, vocab_size: int):
+        self.model = kenlm.Model(model_name + ".binary")
         self.order = self.model.order
+        arpa_path = model_name + ".arpa"
+        self.vocab = self._load_unigram_vocab(arpa_path, vocab_size)
 
-        # Załaduj słownik z pliku lub listy
-        if vocab_path:
-            with open(vocab_path, 'r', encoding='utf-8') as f:
-                self.vocab = [line.strip() for line in f if line.strip()]
-        elif vocab_list:
-            self.vocab = [w for w in vocab_list if not w.startswith("<")]
-        else:
-            raise ValueError("Musisz podać vocab_path lub vocab_list")
+    @staticmethod
+    def _load_unigram_vocab(arpa_path: str, max_vocab: int) -> List[str]:
+        vocab = []
+        with open(arpa_path, "r", encoding="utf8") as f:
+            in_1gram = False
+            for line in f:
+                line = line.strip()
+                if line == "\\1-grams:":
+                    in_1gram = True
+                    continue
+                if in_1gram:
+                    if line.startswith("\\"):
+                        break
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        logprob = float(parts[0])
+                        word = parts[1]
+                        vocab.append((logprob, word))
+
+        # sortuj wg częstości (logprob ~ częstotliwość)
+        vocab.sort(reverse=True)
+        vocab = [w for _, w in vocab[:max_vocab]]
+        return vocab
 
     @staticmethod
     def _split_context_and_prefix(text: str) -> Tuple[List[str], str]:
@@ -70,12 +87,13 @@ class KenLMPredictor:
         return candidates[:k]
 
 if __name__ == "__main__":
-    MODEL_PATH = "model_3gram.binary"
-    VOCAB_PATH = "vocab.txt"  # plik ze słowami, jedno słowo w linii
+    MODEL_NAME = "model_3gram"
+    VOCAB_SIZE = 200_000
 
-    predictor = KenLMPredictor(MODEL_PATH, vocab_path=VOCAB_PATH)
+    predictor = KenLMPredictor(MODEL_NAME, VOCAB_SIZE)
+    print(predictor.vocab[:10])
 
-    context = "chciałabym powiedzieć, że choć przedstawienie było wielce interesujące, to nie było na "
+    context = "chociaż mam prawie trzydzieści lat cały czas czuję się "
     top_k = 5
 
     predictions = predictor.predict_next(context, k=top_k)

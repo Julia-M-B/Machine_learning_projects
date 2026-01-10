@@ -20,12 +20,36 @@ class NextTokenPredictor(ABC):
 
 
 class NGramPredictor(NextTokenPredictor):
-    def __init__(self, model_path: str, vocab_path: str):
+    def __init__(self, model_name: str, vocab_size: int):
         import kenlm
-        self.model = kenlm.Model(model_path)
+        self.model = kenlm.Model(model_name + ".binary")
         self.order = self.model.order
-        with open(vocab_path, 'r', encoding='utf-8') as f:
-            self.vocab = [line.strip() for line in f if line.strip() and not line.startswith("<")]
+        arpa_path = model_name + ".arpa"
+        self.vocab = self._load_unigram_vocab(arpa_path, vocab_size)
+
+    @staticmethod
+    def _load_unigram_vocab(arpa_path: str, max_vocab: int) -> List[str]:
+        vocab = []
+        with open(arpa_path, "r", encoding="utf8") as f:
+            in_1gram = False
+            for line in f:
+                line = line.strip()
+                if line == "\\1-grams:":
+                    in_1gram = True
+                    continue
+                if in_1gram:
+                    if line.startswith("\\"):
+                        break
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        logprob = float(parts[0])
+                        word = parts[1]
+                        vocab.append((logprob, word))
+
+        # sortuj wg częstości (logprob ~ częstotliwość)
+        vocab.sort(reverse=True)
+        vocab = [w for _, w in vocab[:max_vocab]]
+        return vocab
 
     @staticmethod
     def _split_context_and_prefix(text: str) -> Tuple[List[str], str]:
@@ -80,15 +104,16 @@ class NGramPredictor(NextTokenPredictor):
 
 
 class LSTMPredictor(NextTokenPredictor):
-    def __init__(self, model_dir: str, beam_width: int = 50, max_word_length: int = 10, device: str = None):
-        from beam_search import create_beam_searcher
+    def __init__(self, model_dir: str, beam_width: int = 50, max_word_length: int = 10, device: str = None, alpha: float = 0.0):
+        from src.beam_search import create_beam_searcher
         import torch
 
         self.device = torch.device(device if device else "cpu")
         self.searcher = create_beam_searcher(model_dir=model_dir,
                                              beam_width=beam_width,
                                              max_word_length=max_word_length,
-                                             device=device
+                                             device=device,
+                                             alpha=alpha
                                              )
 
 
@@ -175,7 +200,7 @@ class ModelEvaluator:
 
     @staticmethod
     def get_files_paths(indices, paths_file, offsets_file):
-        from model import read_by_index
+        from src.model import read_by_index
         return read_by_index(indices.tolist(), paths_file,
                                 offsets_file)
 
@@ -188,16 +213,13 @@ class ModelEvaluator:
         with open("next_token_prediction_model/config.yml") as f:
             config = yaml.safe_load(f)
 
-        random.seed(config["seed"])
-        np.random.seed(config["seed"])
-
         test_indices = np.load(config["test-indices-file"])
         paths_file = config["train-paths-file"]
         offsets_file = config["train-offsets-file"]
 
         files = self.get_files_paths(test_indices, paths_file, offsets_file)
         random.shuffle(files)
-        files = files[:10]
+        files = files[:100]
 
         for file in tqdm(files, desc="Evaluating files"):
             self.evaluate_file(file)
@@ -290,21 +312,67 @@ class ModelEvaluator:
 if __name__ == "__main__":
     # Inicjalizuj modele
     ngram_model = NGramPredictor(
-        model_path="next_token_prediction_model/ngram/model_3gram.binary",
-        vocab_path="next_token_prediction_model/ngram/vocab.txt"
+        model_name="next_token_prediction_model/ngram/model_3gram",
+        vocab_size=100_000
     )
 
-    lstm_model = LSTMPredictor(
+    lstm_model_alpha0 = LSTMPredictor(
         model_dir="next_token_prediction_model/",
         beam_width=50,
         max_word_length=10,
-        device="cpu"
+        device="cpu",
+        alpha=0.0
+    )
+
+    lstm_model_alpha2 = LSTMPredictor(
+        model_dir="next_token_prediction_model/",
+        beam_width=50,
+        max_word_length=10,
+        device="cpu",
+        alpha=0.2
+    )
+
+    lstm_model_alpha4 = LSTMPredictor(
+        model_dir="next_token_prediction_model/",
+        beam_width=50,
+        max_word_length=10,
+        device="cpu",
+        alpha=0.4
+    )
+
+    lstm_model_alpha6 = LSTMPredictor(
+        model_dir="next_token_prediction_model/",
+        beam_width=50,
+        max_word_length=10,
+        device="cpu",
+        alpha=0.6
+    )
+
+    lstm_model_alpha8 = LSTMPredictor(
+        model_dir="next_token_prediction_model/",
+        beam_width=50,
+        max_word_length=10,
+        device="cpu",
+        alpha=0.8
+    )
+
+    lstm_model_alpha10 = LSTMPredictor(
+        model_dir="next_token_prediction_model/",
+        beam_width=50,
+        max_word_length=10,
+        device="cpu",
+        alpha=1.0
     )
 
     # Stwórz evaluator
     models = {
-        'n-gram': ngram_model,
-        'lstm': lstm_model
+        # 'n-gram': ngram_model,
+        'lstm0': lstm_model_alpha0,
+        'lstm2': lstm_model_alpha2,
+        'lstm4': lstm_model_alpha4,
+        'lstm6': lstm_model_alpha6,
+        'lstm8': lstm_model_alpha8,
+        'lstm10': lstm_model_alpha10,
     }
 
     evaluator = ModelEvaluator(models)
@@ -317,4 +385,4 @@ if __name__ == "__main__":
     evaluator.print_comparison()
 
     # Zapisz do pliku
-    evaluator.save_results("comparison_results.json")
+    evaluator.save_results("comparison_results_lstm_only3.json")

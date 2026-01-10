@@ -11,21 +11,27 @@ from typing import List
 class LSTMLanguageModel(nn.Module):
     """LSTM Language Model architecture."""
     
-    def __init__(self, vocab_size: int, emb_dim: int = 512, hidden_dim: int = 512, 
-                 n_layers: int = 3, dropout: float = 0.1):
+    def __init__(self, vocab_size: int, emb_dim: int = 320, hidden_dim: int = 512,
+                 n_layers: int = 3, dropout: float = 0.2):
         super().__init__()
         self.vocab_size = vocab_size
+        self.emb_dim = emb_dim
+        self.hidden_dim = hidden_dim
         self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
         self.lstm = nn.LSTM(input_size=emb_dim, hidden_size=hidden_dim, 
                            num_layers=n_layers, batch_first=True, 
                            dropout=dropout if n_layers > 1 else 0.0)
-        self.output = nn.Linear(hidden_dim, vocab_size)
+        if self.emb_dim != self.hidden_dim:
+            self.projection = nn.Linear(hidden_dim, emb_dim, bias=False)
+        self.output = nn.Linear(emb_dim, vocab_size)
         self.output.weight = self.embedding.weight
 
     def forward(self, input_ids: torch.LongTensor, hidden=None):
         # input_ids: (batch, seq_len)
         emb = self.embedding(input_ids)  # (batch, seq_len, emb_dim)
         out, hidden = self.lstm(emb, hidden)  # out: (batch, seq_len, hidden)
+        if self.emb_dim != self.hidden_dim:
+            out = self.projection(out)
         logits = self.output(out)  # (batch, seq_len, vocab)
         return logits, hidden
 

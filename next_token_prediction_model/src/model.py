@@ -130,7 +130,7 @@ def train_epoch(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad_norm)
         optimizer.step()
-        scheduler.step()
+        # scheduler.step()
 
         total_loss += loss.item()
         if step % log_steps == 0 and step > 0:
@@ -260,8 +260,8 @@ def main():
 
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=num_training_steps,
-            num_training_steps=num_warmup_steps,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps,
         )
 
         # training loop (sketch)
