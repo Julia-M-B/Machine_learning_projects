@@ -41,7 +41,7 @@ class LSTMModelWrapper:
     Wrapper for LSTM model that provides predict() method for beam search.
     """
     
-    def __init__(self, model_path: str, device: str = None):
+    def __init__(self, model_path: str, device: str = None, seq_len: int = 64):
         """
         Initialize the model wrapper.
         
@@ -93,7 +93,7 @@ class LSTMModelWrapper:
         self.model.eval()
         
         self.vocab_size = vocab_size
-        self.seq_len = 32
+        self.seq_len = seq_len
     
     def predict(self, context_tokens: List[int]) -> List[float]:
         """
@@ -186,7 +186,7 @@ class SentencePieceTokenizer:
                           range(self.vocab_size)]
         return dict(piece_id_pairs)
 
-def load_model_and_tokenizer(model_dir: str = None, device: str = None):
+def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len: int = 64):
     """
     Convenience function to load both model and tokenizer.
     
@@ -210,7 +210,7 @@ def load_model_and_tokenizer(model_dir: str = None, device: str = None):
     if not os.path.exists(tokenizer_path):
         raise FileNotFoundError(f"Tokenizer file not found: {tokenizer_path}")
     
-    model = LSTMModelWrapper(model_path, device=device)
+    model = LSTMModelWrapper(model_path, device=device, seq_len=seq_len)
     tokenizer = SentencePieceTokenizer(tokenizer_path)
     
     return model, tokenizer

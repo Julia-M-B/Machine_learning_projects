@@ -5,7 +5,6 @@ from typing import List, Tuple, Dict
 import json
 from abc import ABC, abstractmethod
 import time
-from collections import deque
 
 
 class NextTokenPredictor(ABC):
@@ -104,7 +103,7 @@ class NGramPredictor(NextTokenPredictor):
 
 
 class LSTMPredictor(NextTokenPredictor):
-    def __init__(self, model_dir: str, beam_width: int = 50, max_word_length: int = 10, device: str = None, alpha: float = 0.0):
+    def __init__(self, model_dir: str, beam_width: int = 50, max_word_length: int = 10, device: str = None, alpha: float = 0.0, seq_len: int = 64):
         from src.beam_search import create_beam_searcher
         import torch
 
@@ -113,7 +112,8 @@ class LSTMPredictor(NextTokenPredictor):
                                              beam_width=beam_width,
                                              max_word_length=max_word_length,
                                              device=device,
-                                             alpha=alpha
+                                             alpha=alpha,
+                                             seq_len=seq_len,
                                              )
 
 

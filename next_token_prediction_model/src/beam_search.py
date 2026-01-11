@@ -289,7 +289,8 @@ class WordPredictionBeamSearch:
 
 
 def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
-                         max_word_length: int = 5, device: str = None, alpha: float = 0.0):
+                         max_word_length: int = 5, device: str = None,
+                         alpha: float = 0.0, seq_len: int = 64):
     """
     Create a beam searcher with real model and tokenizer.
 
@@ -306,7 +307,8 @@ def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
     # from model_loader import load_model_and_tokenizer
 
     model, tokenizer = load_model_and_tokenizer(model_dir=model_dir,
-                                                device=device)
+                                                device=device,
+                                                seq_len=seq_len)
 
     return WordPredictionBeamSearch(
         model=model,

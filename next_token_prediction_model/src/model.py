@@ -70,12 +70,12 @@ class LSTMLanguageModel(nn.Module):
         emb_dim: int = 512,
         hidden_dim: int = 512,
         n_layers: int = 3,
-        dropout: float = 0.1,
-        weights_tied: bool = False,
+        dropout: float = 0.1
     ):
         super().__init__()
         self.vocab_size = vocab_size
-        self.weights_tied = weights_tied
+        self.emb_dim = emb_dim
+        self.hidden_dim = hidden_dim
         self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
         self.lstm = nn.LSTM(
             input_size=emb_dim,
@@ -84,14 +84,17 @@ class LSTMLanguageModel(nn.Module):
             batch_first=True,
             dropout=dropout if n_layers > 1 else 0.0,
         )
-        self.output = nn.Linear(hidden_dim, vocab_size)
-        if self.weights_tied:
-            self.output.weight = self.embedding.weight
+        if self.emb_dim != self.hidden_dim:
+            self.projection = nn.Linear(hidden_dim, emb_dim, bias=False)
+        self.output = nn.Linear(emb_dim, vocab_size)
+        self.output.weight = self.embedding.weight
 
     def forward(self, input_ids: torch.LongTensor, hidden=None):
         # input_ids: (batch, seq_len)
         emb = self.embedding(input_ids)  # (batch, seq_len, emb_dim)
         out, hidden = self.lstm(emb, hidden)  # out: (batch, seq_len, hidden)
+        if self.emb_dim != self.hidden_dim:
+            out = self.projection(out)
         logits = self.output(out)  # (batch, seq_len, vocab)
         return logits, hidden
 
@@ -110,7 +113,6 @@ def train_epoch(
     dataloader: DataLoader,
     optimizer,
     device,
-    scheduler,
     clip_grad_norm: float = 1.0,
     log_steps: int = 200,
 ):
@@ -118,7 +120,7 @@ def train_epoch(
     total_loss = 0.0
     criterion = nn.CrossEntropyLoss()
     it = iter(dataloader)
-    pbar = tqdm(enumerate(it), total=232429, desc="train")
+    pbar = tqdm(enumerate(it), desc="train")
     for step, (inputs, targets) in pbar:
         inputs = inputs.to(device)
         targets = targets.to(device)
@@ -130,7 +132,6 @@ def train_epoch(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad_norm)
         optimizer.step()
-        # scheduler.step()
 
         total_loss += loss.item()
         if step % log_steps == 0 and step > 0:
@@ -200,11 +201,8 @@ def main():
     model_batch_size = config["model-batch-size"]
     n_workers = config["n-workers"]
 
-    weights_tied = config["weights-tied"]
     initial_learning_rate = config["lr"]
     n_epochs = config["n-epochs"]
-    n_steps = config["n-steps"]
-    warmup_ratio = config["scheduler-warmup-ratio"]
 
     for files, val_files in zip(
         get_files_paths(
@@ -249,20 +247,11 @@ def main():
             vocab_size=sp_proc.get_piece_size(),
             emb_dim=512,
             hidden_dim=512,
-            n_layers=3,
-            weights_tied=weights_tied,
+            n_layers=3
         ).to(device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=initial_learning_rate)
 
-        num_training_steps = n_epochs * n_steps
-        num_warmup_steps = int(warmup_ratio * num_training_steps)
-
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_training_steps,
-        )
 
         # training loop (sketch)
         best_val_loss = float("inf")
@@ -283,7 +272,6 @@ def main():
             checkpoint = torch.load(save_path)
             model.load_state_dict(checkpoint["model_state_dict"])
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
             start_epoch = checkpoint["epoch"] + 1
             history = checkpoint["history"]
             best_val_loss = min(checkpoint["history"]["val_loss"])
@@ -291,7 +279,7 @@ def main():
 
         for epoch in range(start_epoch, n_epochs + 1):
             print(f"Training epoch {epoch}:")
-            train_loss = train_epoch(model, dataloader, optimizer, device, scheduler)
+            train_loss = train_epoch(model, dataloader, optimizer, device)
             print(f"Epoch {epoch} train loss: {train_loss:.4f}")
 
             val_loss, val_ppl = compute_val_ppl(model, val_dataloader, device)
@@ -306,7 +294,6 @@ def main():
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
                 "vocab_size": sp_proc.get_piece_size(),
                 "sp_model_path": tokenizer_model,
                 "train_loss": train_loss,
