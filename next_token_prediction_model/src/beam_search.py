@@ -139,7 +139,7 @@ class WordPredictionBeamSearch:
             beam = heapq.nsmallest(self.beam_width, beam)
 
         # Continue until we have k completed words or beam is exhausted
-        while beam and len(completed_words) < k * 2 and iteration < max_iterations:
+        while beam and len(completed_words) < k and iteration < max_iterations:
             iteration += 1
 
             # Pop the most promising partial word (lowest neg_log_prob = highest prob)

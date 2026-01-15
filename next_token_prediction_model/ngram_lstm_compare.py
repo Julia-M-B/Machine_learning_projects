@@ -318,7 +318,7 @@ if __name__ == "__main__":
 
     lstm_model_alpha0 = LSTMPredictor(
         model_dir="next_token_prediction_model/",
-        beam_width=50,
+        beam_width=25,
         max_word_length=10,
         device="cpu",
         alpha=0.0
@@ -326,7 +326,7 @@ if __name__ == "__main__":
 
     lstm_model_alpha2 = LSTMPredictor(
         model_dir="next_token_prediction_model/",
-        beam_width=50,
+        beam_width=25,
         max_word_length=10,
         device="cpu",
         alpha=0.2
@@ -334,7 +334,7 @@ if __name__ == "__main__":
 
     lstm_model_alpha4 = LSTMPredictor(
         model_dir="next_token_prediction_model/",
-        beam_width=50,
+        beam_width=25,
         max_word_length=10,
         device="cpu",
         alpha=0.4
@@ -342,7 +342,7 @@ if __name__ == "__main__":
 
     lstm_model_alpha6 = LSTMPredictor(
         model_dir="next_token_prediction_model/",
-        beam_width=50,
+        beam_width=25,
         max_word_length=10,
         device="cpu",
         alpha=0.6
@@ -350,7 +350,7 @@ if __name__ == "__main__":
 
     lstm_model_alpha8 = LSTMPredictor(
         model_dir="next_token_prediction_model/",
-        beam_width=50,
+        beam_width=25,
         max_word_length=10,
         device="cpu",
         alpha=0.8
@@ -358,7 +358,7 @@ if __name__ == "__main__":
 
     lstm_model_alpha10 = LSTMPredictor(
         model_dir="next_token_prediction_model/",
-        beam_width=50,
+        beam_width=25,
         max_word_length=10,
         device="cpu",
         alpha=1.0
@@ -366,7 +366,7 @@ if __name__ == "__main__":
 
     # Stwórz evaluator
     models = {
-        # 'n-gram': ngram_model,
+        'n-gram': ngram_model,
         'lstm0': lstm_model_alpha0,
         'lstm2': lstm_model_alpha2,
         'lstm4': lstm_model_alpha4,
@@ -385,4 +385,4 @@ if __name__ == "__main__":
     evaluator.print_comparison()
 
     # Zapisz do pliku
-    evaluator.save_results("comparison_results_lstm_only3.json")
+    evaluator.save_results("comparison_results_16k_2.json")
