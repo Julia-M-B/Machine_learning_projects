@@ -314,7 +314,7 @@ def hyperparameters_setup_generator(
     def _get_param_value(param_name, trial_params, trial_combination):
         """Helper to get parameter value from trial or fixed config."""
         if param_name in trial_params:
-            idx = trial_params.index(param_name)
+            idx = list(trial_params).index(param_name)
             return trial_combination[idx]
         fixed_val = fixed_config.get(param_name)
         return fixed_val
