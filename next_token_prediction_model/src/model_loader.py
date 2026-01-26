@@ -11,21 +11,27 @@ from typing import List
 class LSTMLanguageModel(nn.Module):
     """LSTM Language Model architecture."""
     
-    def __init__(self, vocab_size: int, emb_dim: int = 512, hidden_dim: int = 512, 
-                 n_layers: int = 3, dropout: float = 0.1):
+    def __init__(self, vocab_size: int, emb_dim: int = 320, hidden_dim: int = 512,
+                 n_layers: int = 3, dropout: float = 0.2):
         super().__init__()
         self.vocab_size = vocab_size
+        self.emb_dim = emb_dim
+        self.hidden_dim = hidden_dim
         self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
         self.lstm = nn.LSTM(input_size=emb_dim, hidden_size=hidden_dim, 
                            num_layers=n_layers, batch_first=True, 
                            dropout=dropout if n_layers > 1 else 0.0)
-        self.output = nn.Linear(hidden_dim, vocab_size)
+        if self.emb_dim != self.hidden_dim:
+            self.projection = nn.Linear(hidden_dim, emb_dim, bias=False)
+        self.output = nn.Linear(emb_dim, vocab_size)
         self.output.weight = self.embedding.weight
 
     def forward(self, input_ids: torch.LongTensor, hidden=None):
         # input_ids: (batch, seq_len)
         emb = self.embedding(input_ids)  # (batch, seq_len, emb_dim)
         out, hidden = self.lstm(emb, hidden)  # out: (batch, seq_len, hidden)
+        if self.emb_dim != self.hidden_dim:
+            out = self.projection(out)
         logits = self.output(out)  # (batch, seq_len, vocab)
         return logits, hidden
 
@@ -35,7 +41,7 @@ class LSTMModelWrapper:
     Wrapper for LSTM model that provides predict() method for beam search.
     """
     
-    def __init__(self, model_path: str, device: str = None):
+    def __init__(self, model_path: str, device: str = None, seq_len: int = 64):
         """
         Initialize the model wrapper.
         
@@ -87,7 +93,7 @@ class LSTMModelWrapper:
         self.model.eval()
         
         self.vocab_size = vocab_size
-        self.seq_len = 32
+        self.seq_len = seq_len
     
     def predict(self, context_tokens: List[int]) -> List[float]:
         """
@@ -180,7 +186,7 @@ class SentencePieceTokenizer:
                           range(self.vocab_size)]
         return dict(piece_id_pairs)
 
-def load_model_and_tokenizer(model_dir: str = None, device: str = None):
+def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len: int = 64):
     """
     Convenience function to load both model and tokenizer.
     
@@ -204,7 +210,7 @@ def load_model_and_tokenizer(model_dir: str = None, device: str = None):
     if not os.path.exists(tokenizer_path):
         raise FileNotFoundError(f"Tokenizer file not found: {tokenizer_path}")
     
-    model = LSTMModelWrapper(model_path, device=device)
+    model = LSTMModelWrapper(model_path, device=device, seq_len=seq_len)
     tokenizer = SentencePieceTokenizer(tokenizer_path)
     
     return model, tokenizer

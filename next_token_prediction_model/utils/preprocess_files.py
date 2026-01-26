@@ -2,6 +2,7 @@ import glob
 import re
 import unicodedata
 from pathlib import Path
+from string import ascii_lowercase
 
 import yaml
 from tqdm import tqdm
@@ -634,6 +635,74 @@ vulgarisms = [
     "zjeby",
 ]
 
+one_letter_words = [
+    "a",
+    "i",
+    "o",
+    "r",
+    "u",
+    "w",
+    "z",
+]
+
+# chosen from https://poocoo.pl/slowa-2-literowe
+two_letter_words = [
+    "ad",
+    "aj",
+    "ak",
+    "au",
+    "aż",
+    "by",
+    "ci",
+    "co",
+    "da",
+    "do",
+    "co",
+    "eh",
+    "ej",
+    "go",
+    "ha",
+    "hę",
+    "hm",
+    "im",
+    "iż",
+    "ja",
+    "ją",
+    "je",
+    "ku",
+    "ma",
+    "mą",
+    "mi",
+    "mu",
+    "my",
+    "na",
+    "no",
+    "od",
+    "oh",
+    "oj",
+    "ok",
+    "on",
+    "ot",
+    "ów",
+    "po",
+    "ps",
+    "są",
+    "ta",
+    "tą",
+    "te",
+    "tę",
+    "to",
+    "tu",
+    "ty",
+    "ul",
+    "we",
+    "wg",
+    "wy",
+    "za",
+    "ze",
+    "że",
+]
+
 vulgarismis_joined = "|".join(vulgarisms)
 
 eos_regex = re.compile(r"(?<=[.!?])\s*(?=[A-ZŚŻŹĆŁÓĘĄ])")
@@ -642,14 +711,12 @@ url_regex = re.compile(r"\b(?:https?://\S+|www\.\S+)")
 alphanumeric_regex = re.compile(r"[^a-ząćęłńóśźż0-9\s]")
 multiple_whitespace_regex = re.compile(r"[ \t]+")
 vulgarisms_regex = re.compile(vulgarismis_joined)
-multiple_a_regex = re.compile("a+")
-multiple_m_regex = re.compile("m+")
-multiple_y_regex = re.compile("y+")
 mhm_regex = re.compile("m+h+m+")
 hm_regex = re.compile(r"\sh+m+\s")
 hy_regex = re.compile(r"y+h+|\s+(hy)+h+y+")
-yy_regex = re.compile(r"\s+y+")
 hf_nesw_regex = re.compile("wieszwiecejpolub nas")
+
+letters = ascii_lowercase + "ąćęłńóśżź"
 
 
 def get_files_names(dir_path: str, dataset_name: str):
@@ -664,20 +731,30 @@ def clean(text: str):
     text = text.lower()
     text = url_regex.sub("", text)
     text = unicodedata.normalize("NFC", text)
-    text = alphanumeric_regex.sub("", text)
+    text = alphanumeric_regex.sub(" ", text)
     text = multiple_whitespace_regex.sub(" ", text)
     text = vulgarisms_regex.sub("", text)
-    text = multiple_a_regex.sub("a", text)
-    text = multiple_m_regex.sub("m", text)
-    text = multiple_y_regex.sub("y", text)
+    for letter in letters:
+        pattern = f"({letter})" + "{3,}"
+        text = re.sub(pattern, f"l{letter}", text)
     text = mhm_regex.sub("tak", text)
     text = hm_regex.sub("", text)
     text = hy_regex.sub("", text)
-    text = yy_regex.sub("", text)
     text = hf_nesw_regex.sub("", text)
-    return "\n".join(
-        [sentence.strip() for sentence in text.split("\n") if sentence.strip()]
-    )
+    lines = []
+    for line in text.split("\n"):
+        filtered_words = [
+            word
+            for word in line.split()
+            if len(word) > 1 or word in one_letter_words or word.isdigit()
+        ]
+        filtered_words = [
+            word
+            for word in filtered_words
+            if len(word) != 2 or word in two_letter_words or word.isdigit()
+        ]
+        lines.append(" ".join(filtered_words))
+    return "\n".join([sentence.strip() for sentence in lines if sentence.strip()])
 
 
 def preprocess_files(

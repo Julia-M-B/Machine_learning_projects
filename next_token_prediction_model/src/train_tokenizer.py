@@ -55,19 +55,23 @@ if __name__ == "__main__":
     written_offsets_file = config["train-offsets-file"]
     conversations_tune_paths = config["conversations-tune-paths-file"]
     conversations_tune_offsets = config["conversations-tune-offsets-file"]
-    model_prefix = config["tokenizer-prefix"]
-    vocab_size = config["vocab-size"]
     tokenizer_type = config["tokenizer-type"]
+
+    # train different tokenizers for hyperparameter optimization
+    model_prefixes = config["tokenizer-prefix"]
+    vocab_sizes = config["vocab-size"]
 
     train_indices = np.load(config["train-indices-file"])
     np.random.shuffle(train_indices)
     n = int(config["tokenizer-ratio"] * len(train_indices))
     tokenizer_indices = train_indices[:n].tolist()
     tune_tokenizer_indices = np.load(config["conversations-tune-indices-file"]).tolist()
-    train_sentencepiece_tokenizer(paths_files=[written_paths_file, conversations_tune_paths],
-                                  indices_list=[tokenizer_indices, tune_tokenizer_indices],
-                                  offsets_files=[written_offsets_file, conversations_tune_offsets],
-                                  model_prefix=model_prefix,
-                                  vocab_size=vocab_size,
-                                  model_type=tokenizer_type)
+
+    for model_prefix, vocab_size in zip(model_prefixes, vocab_sizes):
+        train_sentencepiece_tokenizer(paths_files=[written_paths_file, conversations_tune_paths],
+                                      indices_list=[tokenizer_indices, tune_tokenizer_indices],
+                                      offsets_files=[written_offsets_file, conversations_tune_offsets],
+                                      model_prefix=model_prefix,
+                                      vocab_size=vocab_size,
+                                      model_type=tokenizer_type)
 

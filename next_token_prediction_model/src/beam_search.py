@@ -53,8 +53,8 @@ class CompletedWord:
 class WordPredictionBeamSearch:
     """Efficient beam search for finding top-K most probable next words."""
 
-    def __init__(self, model, tokenizer, beam_width: int = 30,
-                 max_word_length: int = 10):
+    def __init__(self, model, tokenizer, beam_width: int = 50,
+                 max_word_length: int = 15, alpha: float = 0.2):
         """
         Args:
             model: LSTM model with predict() method that returns token probabilities
@@ -68,6 +68,7 @@ class WordPredictionBeamSearch:
         self.max_word_length = max_word_length
         self.inference_count = 0
         self.start_new_word_char: str = "▁"
+        self.alpha = alpha
 
     def starts_new_word(self, token_id: int) -> bool:
         """Check if a token starts a new word (piece starts with '▁' marker)."""
@@ -106,10 +107,6 @@ class WordPredictionBeamSearch:
         # Track explored prefixes to avoid cycles (only mark as explored after processing)
         explored_prefixes: set[Tuple[int, ...]] = set()
 
-        # print(f"Starting beam search for: '{context_text}'")
-        # print(
-        #     f"Beam width: {self.beam_width}, Max word length: {self.max_word_length}\n")
-
         iteration = 0
         max_iterations = k * self.beam_width * 10  # Safety limit to prevent infinite loops
 
@@ -117,12 +114,6 @@ class WordPredictionBeamSearch:
         if unfinished_word:
             # Pop the most promising partial word (lowest neg_log_prob = highest prob)
             current = heapq.heappop(beam)
-            current_log_prob_normalised = -current.neg_log_prob_normalised
-
-            # print(
-            #     f"\nExploring prefix: '{current.text}' (tokens: {current.tokens})")
-            # print(
-            #     f"  Cumulative log prob: {current_log_prob_normalised:.4f} (prob: {math.exp(current_log_prob_normalised):.6f})")
 
             # Mark this prefix as explored (we're about to process it)
             explored_prefixes.add(tuple(current.tokens))
@@ -143,37 +134,22 @@ class WordPredictionBeamSearch:
                                                         token_prob)
                 if tuple(new_item.tokens) not in explored_prefixes:
                     heapq.heappush(beam, new_item)
-                    # print(
-                    #     f"    + '{self.tokenizer.id_to_piece(token_id)}' → Continue: '{new_item.text}' "
-                    #     f"(prob: {math.exp(-new_item.neg_log_prob_normalised):.6f})")
 
             # Prune beam to width (keep only top beam_width items)
             beam = heapq.nsmallest(self.beam_width, beam)
-            # print(f"\n  Beam pruned to {self.beam_width} items")
 
         # Continue until we have k completed words or beam is exhausted
         while beam and len(completed_words) < k and iteration < max_iterations:
             iteration += 1
-            # print(f"=== Iteration {iteration} ===")
-            # print(
-            #     f"Beam size: {len(beam)}, Completed words: {len(completed_words)}")
 
             # Pop the most promising partial word (lowest neg_log_prob = highest prob)
             current = heapq.heappop(beam)
-            current_log_prob_normalised = -current.neg_log_prob_normalised
-
-            # print(
-            #     f"\nExploring prefix: '{current.text}' (tokens: {current.tokens})")
-            # print(
-            #     f"  Cumulative log prob: {current_log_prob_normalised:.4f} (prob: {math.exp(current_log_prob_normalised):.6f})")
 
             # Prune: Skip if prefix is too long (unlikely to be a real word)
             if len(current.tokens) > self.max_word_length:
-                # print(f"  → Pruned (exceeds max length {self.max_word_length})")
                 continue
 
             if tuple(current.tokens) in explored_prefixes:
-                # print(f"  → Skipping (already explored)")
                 continue
 
 
@@ -190,10 +166,6 @@ class WordPredictionBeamSearch:
             else:
                 top_next_tokens = self._get_top_tokens(token_probs, self.beam_width)
 
-            # print(f"  → Inference #{self.inference_count}")
-            #
-            # print(f"  Exploring {len(top_next_tokens)} next tokens:")
-
             # Expand beam with each possible next token
             for token_id, token_prob in top_next_tokens:
                 if not self.contains_letters_only(token_id):
@@ -209,18 +181,12 @@ class WordPredictionBeamSearch:
                                                completed_word)
                                 completed_words_texts.append(
                                     completed_word.text)
-                                # print(
-                                #     f"    ✓ '{self.tokenizer.id_to_piece(token_id)}' → COMPLETE WORD: '{completed_word.text}' "
-                                #     f"(prob: {completed_word.probability:.6f})")
 
                     # no prefixes were made yet; we have to create first prefixes
                     else:
                         new_item = self._create_new_beam_prefix(current, token_id, token_prob)
                         if tuple(new_item.tokens) not in explored_prefixes:
                             heapq.heappush(beam, new_item)
-                            # print(
-                            #     f"    + '{self.tokenizer.id_to_piece(token_id)}' → Continue: '{new_item.text}' "
-                            #     f"(prob: {math.exp(-new_item.neg_log_prob_normalised):.6f})")
 
                 else:
                     # Word continues, add to beam
@@ -228,26 +194,9 @@ class WordPredictionBeamSearch:
                                                             token_prob)
                     if tuple(new_item.tokens) not in explored_prefixes:
                         heapq.heappush(beam, new_item)
-                        # print(
-                        #     f"    + '{self.tokenizer.id_to_piece(token_id)}' → Continue: '{new_item.text}' "
-                        #     f"(prob: {math.exp(-new_item.neg_log_prob_normalised):.6f})")
-                    # else:
-                        # print(
-                        #     f"    - '{self.tokenizer.id_to_piece(token_id)}' → Skipped (already in beam or explored)")
 
             # Prune beam to width (keep only top beam_width items)
             beam = heapq.nsmallest(self.beam_width, beam)
-            # print(f"\n  Beam pruned to {self.beam_width} items")
-
-        # print(f"\n{'=' * 50}")
-        # if iteration >= max_iterations:
-        #     print(
-        #         f"Search stopped: reached maximum iterations ({max_iterations})")
-        # else:
-        #     print(f"Search complete!")
-        # print(f"Total iterations: {iteration}")
-        # print(f"Total inferences: {self.inference_count}")
-        # print(f"Completed words found: {len(completed_words)}")
 
         # Return top k completed words
         top_words = heapq.nsmallest(k, completed_words)
@@ -294,7 +243,7 @@ class WordPredictionBeamSearch:
             tokens_probs = self.model.predict(context_tokens + word_tokens[:i])
             prob = tokens_probs[word_tokens[i]]
             log_prob += np.log(prob)
-        return math.exp(log_prob / len(word_tokens))
+        return math.exp(log_prob / (len(word_tokens) ** self.alpha))
 
     @staticmethod
     def _clean_context_text(context_text: str) -> str:
@@ -330,7 +279,7 @@ class WordPredictionBeamSearch:
         new_tokens = current_prefix.tokens + [token_id]
         new_text = current_prefix.text + self.tokenizer.decode([token_id])
         new_log_prob = current_prefix.neg_log_prob - math.log(token_prob)
-        new_log_prob_normalised = new_log_prob / len(new_tokens)
+        new_log_prob_normalised = new_log_prob / (len(new_tokens) ** self.alpha)
         return BeamItem(
             neg_log_prob_normalised=new_log_prob_normalised,
             neg_log_prob=new_log_prob,
@@ -340,7 +289,8 @@ class WordPredictionBeamSearch:
 
 
 def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
-                         max_word_length: int = 5, device: str = None):
+                         max_word_length: int = 5, device: str = None,
+                         alpha: float = 0.0, seq_len: int = 64):
     """
     Create a beam searcher with real model and tokenizer.
 
@@ -353,16 +303,19 @@ def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
     Returns:
         WordPredictionBeamSearch instance
     """
-    from model_loader import load_model_and_tokenizer
+    from src.model_loader import load_model_and_tokenizer
+    # from model_loader import load_model_and_tokenizer
 
     model, tokenizer = load_model_and_tokenizer(model_dir=model_dir,
-                                                device=device)
+                                                device=device,
+                                                seq_len=seq_len)
 
     return WordPredictionBeamSearch(
         model=model,
         tokenizer=tokenizer,
         beam_width=beam_width,
-        max_word_length=max_word_length
+        max_word_length=max_word_length,
+        alpha=alpha
     )
 
 if __name__ == "__main__":
@@ -372,7 +325,7 @@ if __name__ == "__main__":
     print("Model loaded successfully!\n")
 
     # Find top 5 most probable next words
-    context = "chciałabym powiedzieć, że choć przedstawienie było wielce interesujące, to nie było na "
+    context = "chociaż mam prawie trzydzieści lat cały czas czuję się "
     top_words = searcher.get_top_k_words(context, k=5)
 
     print(f"\n{'=' * 50}")
