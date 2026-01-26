@@ -1,75 +1,24 @@
-import glob
 import json
 import random
 from dataclasses import asdict, dataclass, field
 from itertools import product
 from pathlib import Path
-from typing import Dict, Generator, List, Tuple
+from typing import Any, Dict, Generator, List, Tuple
 
 import numpy as np
 import sentencepiece as spm
 import torch
+import yaml
 from src.beam_search import WordPredictionBeamSearch
 from src.model import (
     LSTMLanguageModel,
+    LSTMModelWrapper,
     StreamingTextDataset,
     compute_val_ppl,
+    get_files_paths,
     train_epoch,
 )
 from torch.utils.data import DataLoader
-
-
-class LSTMModelWrapper:
-    """
-    Wrapper class for LSTM Language Model to provide prediction interface.
-
-    This class encapsulates the LSTM model and provides a simplified interface
-    for making predictions on token sequences.
-
-    Attributes:
-        device (str): Device to run the model on ('cuda' or 'cpu').
-        model (LSTMLanguageModel): The underlying LSTM language model.
-        vocab_size (int): Size of the vocabulary.
-        seq_len (int): Maximum sequence length to consider for predictions.
-    """
-
-    def __init__(self, model: LSTMLanguageModel, seq_len: int = 64):
-        """
-        Initialize the LSTM model wrapper.
-
-        Args:
-            model: The LSTM language model to wrap.
-            seq_len: Maximum sequence length for context. Defaults to 64.
-        """
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = model
-        self.model.to(self.device)
-        self.model.eval()
-
-        self.vocab_size = self.model.vocab_size
-        self.seq_len = seq_len
-
-    def predict(self, context_tokens: List[int]) -> List[float]:
-        """
-        Predict probability distribution over next tokens given context.
-
-        Args:
-            context_tokens: List of token IDs representing the context.
-                           If empty, returns uniform distribution.
-
-        Returns:
-            List of probabilities for each token in vocabulary.
-            Length equals vocab_size.
-        """
-        if not context_tokens:
-            return [1.0 / self.vocab_size] * self.vocab_size
-        context_tokens = context_tokens[-self.seq_len :]
-        input_ids = torch.LongTensor([context_tokens]).to(self.device)
-        with torch.no_grad():
-            logits, _ = self.model(input_ids)
-            last_logits = logits[0, -1, :]
-            probs = torch.softmax(last_logits, dim=0)
-            return probs.cpu().tolist()
 
 
 @dataclass()
@@ -105,17 +54,17 @@ class ExperimentData:
     """
     Data class storing results from a single hyperparameter experiment.
 
-    The class is ordered by best_score for easy comparison of experiments.
+    The class is ordered by best_val_acc5 for easy comparison of experiments.
 
     Attributes:
         params: Dictionary of hyperparameter values used.
-        best_score: Best validation accuracy achieved during training.
+        best_val_acc5: Best validation accuracy achieved during training.
         history: Dictionary containing training metrics over epochs.
         trial_params: List of parameter names that were varied in this trial.
     """
 
     params: dict = field(compare=False)
-    best_score: float
+    best_val_acc5: float
     history: dict = field(compare=False)
     trial_params: list = field(compare=False)
 
@@ -168,16 +117,12 @@ def evaluate_top_k_words(
         with open(file, "r", encoding="utf-8") as f:
             text = f.read()
         words = text.split()
-        sequence = []
 
-        for word in words:
-            sequence.append(word)
-            while len(sequence) >= seq_len + 1:
-                context = " ".join(sequence[:seq_len]) + " "
-                target = sequence[seq_len]
-                acc5 += get_top_k_accuracy(searcher, context, target, k)
-                preds_counter += 1
-                sequence = sequence[slide:]
+        for i in range(0, len(words) - seq_len, slide):
+            context = " ".join(words[i : i + seq_len]) + " "
+            target = words[i + seq_len]
+            acc5 += get_top_k_accuracy(searcher, context, target, k)
+            preds_counter += 1
 
     return acc5 / preds_counter if preds_counter > 0 else 0
 
@@ -255,7 +200,7 @@ def create_and_train_model(
         "val_ppl": [],
         "val_acc5": [],
     }
-    best_score = 0
+    best_val_acc5 = 0
 
     for epoch in range(1, n_epochs + 1):
         print(f"Training epoch {epoch}:")
@@ -275,19 +220,19 @@ def create_and_train_model(
         history["val_ppl"].append(val_ppl)
         history["val_acc5"].append(val_acc5)
 
-        if best_score < val_acc5:
-            best_score = val_acc5
+        if best_val_acc5 < val_acc5:
+            best_val_acc5 = val_acc5
 
     return ExperimentData(
         params=asdict(hyperparameters),
-        best_score=best_score,
+        best_val_acc5=best_val_acc5,
         history=history,
         trial_params=trial_params,
     )
 
 
 def hyperparameters_setup_generator(
-    fixed_config: Dict[str, any], trial_config: Dict[str, List[any]]
+    fixed_config: Dict[str, Any], trial_config: Dict[str, List[Any]]
 ) -> Generator[Hyperparameters, None, None]:
     """
     Generate all combinations of hyperparameters for grid search.
@@ -317,6 +262,8 @@ def hyperparameters_setup_generator(
             idx = list(trial_params).index(param_name)
             return trial_combination[idx]
         fixed_val = fixed_config.get(param_name)
+        if fixed_val is None:
+            raise KeyError(f"Missing hyperparameter: {param_name}")
         return fixed_val
 
     trial_params_names = trial_config.keys()
@@ -342,8 +289,8 @@ def hyperparameters_setup_generator(
 
 def run_grid_search(
     study_num: int,
-    fixed_config: Dict[str, any],
-    trial_config: Dict[str, List[any]],
+    fixed_config: Dict[str, Any],
+    trial_config: Dict[str, List[Any]],
     train_files: List[str],
     val_files: List[str],
     n_epochs: int = 3,
@@ -375,10 +322,9 @@ def run_grid_search(
         Creates JSON files in save_dir with results from each trial.
         File format: study_{study_num}_trial_{trial_num}.json
     """
-    i = 0
     results = []
 
-    for hyperparams in hyperparameters_setup_generator(fixed_config, trial_config):
+    for i, hyperparams in enumerate(hyperparameters_setup_generator(fixed_config, trial_config)):
         print("Trial nr", i)
         print("Hyperparameters:")
         print(asdict(hyperparams))
@@ -400,35 +346,33 @@ def run_grid_search(
             save_path = save_path / file_name
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(asdict(experiment_result), f, indent=2)
-            i += 1
 
     return results
 
 
 def get_best_config(
     results: List[ExperimentData],
-) -> Tuple[ExperimentData, Dict[str, any]]:
+) -> Tuple[ExperimentData, Dict[str, Any]]:
     """
     Find the best performing configuration from grid search results.
 
-    Sorts results by best_score in descending order and extracts the
-    configuration of trial parameters from the top result.
+    Extracts the configuration of trial parameters that has the highest
+    value of top-5 accuracy.
 
     Args:
         results: List of ExperimentData objects from grid search.
 
     Returns:
         Tuple containing:
-            - ExperimentData object with best score
+            - ExperimentData object with best top-5 accuracy
             - Dictionary mapping trial parameter names to their best values
 
     Example:
         >>> best_result, best_config = get_best_config(results)
-        >>> print(f"Best accuracy: {best_result.best_score}")
+        >>> print(f"Best accuracy: {best_result.best_val_acc5}")
         >>> print(f"Best learning rate: {best_config['lr']}")
     """
-    results.sort(reverse=True)
-    best_result = results[0]
+    best_result = max(results, key=lambda r: r.best_val_acc5)
     trial_params = best_result.trial_params
     params = best_result.params
     best_config = {}
@@ -441,15 +385,22 @@ def get_best_config(
 
 if __name__ == "__main__":
 
-    SEED = 42
+    with open("config.yml", "r") as f:
+        config = yaml.safe_load(f)
+
+    # set seed to make the hyperparameters optimization reproducible
+    SEED = config.get("seed", 42)
 
     torch.manual_seed(SEED)
     torch.cuda.manual_seed_all(SEED)
     random.seed(SEED)
     np.random.seed(SEED)
 
+    HYPERPARAMETERS_RATIO = config.get("hyperparameters-ratio", 0.25)
+    VAL_RATIO = 5e-4
+
+    # capacity parameters
     TOKENIZER = [
-        "spm_2k.model",
         "spm_4k.model",
         "spm_8k.model",
         "spm_12k.model",
@@ -457,24 +408,27 @@ if __name__ == "__main__":
     ]
     EMBEDDING_DIM = [256, 320]
 
-    N_LAYERS = [2, 3, 4]
+    # LSTM parameters
+    N_LAYERS = [2, 3]
     HIDDEN_UNITS = [256, 384, 512]
 
+    # regularization parameters
     DROPOUT = [0.2, 0.25, 0.3]
     WEIGHT_DECAY = [1e-2, 1e-3, 1e-4]
 
-    BATCH_SIZE = [32, 64, 128, 256]
-    SEQ_LEN = [32, 64, 128, 256]
-    LEARNING_RATE = [5e-4, 1e-3, 2e-3]
+    # learning parameters
+    BATCH_SIZE = [64, 128]
+    SEQ_LEN = [64, 128, 256]
+    LEARNING_RATE = [1e-3, 2e-3]
 
     study_1 = {
         "fixed_config": {
             "n_layers": 3,
-            "hidden_units": 512,
+            "hidden_units": 384,
             "dropout": 0.2,
             "weight_decay": 1e-2,
             "batch_size": 128,
-            "seq_len": 64,
+            "seq_len": 128,
             "lr": 1e-3,
         },
         "trial_config": {
@@ -488,7 +442,7 @@ if __name__ == "__main__":
             "dropout": 0.2,
             "weight_decay": 1e-2,
             "batch_size": 128,
-            "seq_len": 64,
+            "seq_len": 128,
             "lr": 1e-3,
         },
         "trial_config": {
@@ -500,7 +454,7 @@ if __name__ == "__main__":
     study_3 = {
         "fixed_config": {
             "batch_size": 128,
-            "seq_len": 64,
+            "seq_len": 128,
             "lr": 1e-3,
         },
         "trial_config": {
@@ -518,21 +472,36 @@ if __name__ == "__main__":
         },
     }
 
-    configs = [study_1, study_2, study_3, study_4]
+    final_results = {
+        "fixed_config": {},
+    }
 
-    files_paths = glob.glob("./*.txt")
-    random.shuffle(files_paths)
-    n = int(0.5 * len(files_paths))
-    files_paths = files_paths[:n]
-    m = max(int(1e-4 * len(files_paths)), 1) * 5
+    params_configs = [study_1, study_2, study_3, study_4, final_results]
+
+    # get files paths
+    written_paths_file = config["train-paths-file"]
+    written_offsets_file = config["train-offsets-file"]
+    train_indices = np.load(config["train-indices-file"])
+
+    n = int(HYPERPARAMETERS_RATIO * len(train_indices))
+    m = max(int(VAL_RATIO * n), 1)
+
+    files_paths = get_files_paths(
+        batch_size=n,
+        indices=train_indices[:n],
+        paths_file=written_paths_file,
+        offsets_file=written_offsets_file,
+    )
+
     train_files = files_paths[:-m]
     val_files = files_paths[-m:]
 
-    for study_num, config in enumerate(configs):
+    # run grid search
+    for study_num, params_config in enumerate(params_configs[:-1]):
         results = run_grid_search(
             study_num=study_num,
-            fixed_config=config.get("fixed_config"),
-            trial_config=config.get("trial_config"),
+            fixed_config=params_config.get("fixed_config"),
+            trial_config=params_config.get("trial_config"),
             train_files=train_files,
             val_files=val_files,
         )
@@ -540,8 +509,12 @@ if __name__ == "__main__":
         print("=" * 50)
         print("BEST CONFIG:")
         print(best_config)
-        print("TOP 5 ACCURACY:", best_result.best_score)
+        print("TOP 5 ACCURACY:", best_result.best_val_acc5)
 
-        for next_config in configs[study_num + 1 :]:
+        for next_config in params_configs[study_num + 1 :]:
             for param, val in best_config.items():
                 next_config["fixed_config"][param] = val
+
+    # save the final results (best hyperparameters configuration) of the run experiment
+    with open("model_config.yml", "w") as f_out:
+        yaml.dump(final_results["fixed_config"], f_out)
