@@ -385,7 +385,7 @@ def get_best_config(
 
 if __name__ == "__main__":
 
-    with open("config.yml", "r") as f:
+    with open("next_token_prediction_model/config.yml", "r") as f:
         config = yaml.safe_load(f)
 
     # set seed to make the hyperparameters optimization reproducible
@@ -486,15 +486,14 @@ if __name__ == "__main__":
     n = int(HYPERPARAMETERS_RATIO * len(train_indices))
     m = max(int(VAL_RATIO * n), 1)
 
-    files_paths = get_files_paths(
+    for files_paths in get_files_paths(
         batch_size=n,
         indices=train_indices[:n],
         paths_file=written_paths_file,
         offsets_file=written_offsets_file,
-    )
-
-    train_files = files_paths[:-m]
-    val_files = files_paths[-m:]
+    ):
+        train_files = files_paths[:-m]
+        val_files = files_paths[-m:]
 
     # run grid search
     for study_num, params_config in enumerate(params_configs[:-1]):
@@ -516,5 +515,5 @@ if __name__ == "__main__":
                 next_config["fixed_config"][param] = val
 
     # save the final results (best hyperparameters configuration) of the run experiment
-    with open("model_config.yml", "w") as f_out:
+    with open("next_token_prediction_model/model_config.yml", "w") as f_out:
         yaml.dump(final_results["fixed_config"], f_out)
