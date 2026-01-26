@@ -1,0 +1,30 @@
+# virtual environments
+/**/venv
+/**/.env
+/**/.venv
+
+# PyCharm directory
+.idea
+
+# results files
+*.json
+
+# streaming dataset files
+*.txt
+*.npy
+
+# do not exclude requirements files
+!/**/requirements.txt
+
+# dataset comparison files
+next_token_prediction_model/utils/*.txt
+
+# models
+/**/*.arpa
+/**/*.pt
+/**/*.model
+/**/*.binary
+
+
+
+
