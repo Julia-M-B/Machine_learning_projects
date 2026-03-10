@@ -58,3 +58,6 @@ tokenizer-ratio: 0.1
 
 # hyperparameters dataset ratio
 hyperparameters-ratio: 0.25
+
+n-workers: 4
+n-epochs: 30
