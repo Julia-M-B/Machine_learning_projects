@@ -9,7 +9,6 @@ import yaml
 from torch import nn
 from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 from tqdm import tqdm
-from transformers import get_cosine_schedule_with_warmup
 
 
 class StreamingTextDataset(IterableDataset):
@@ -24,13 +23,12 @@ class StreamingTextDataset(IterableDataset):
         self.vocab_size = self.sp.get_piece_size()
 
     def _file_iterator_for_worker(self) -> Iterator[str]:
-        """Return an iterator over file paths for this worker only."""
         worker_info = get_worker_info()
         if worker_info is None:
             # single-process loader
             file_list = self.files
         else:
-            # split files between workers by simple round-robin
+            # split files between workers
             wid = worker_info.id
             nworkers = worker_info.num_workers
             file_list = self.files[wid::nworkers]
@@ -67,7 +65,7 @@ class LSTMLanguageModel(nn.Module):
     def __init__(
         self,
         vocab_size: int,
-        emb_dim: int = 512,
+        emb_dim: int,
         hidden_dim: int = 512,
         n_layers: int = 3,
         dropout: float = 0.1
@@ -90,19 +88,69 @@ class LSTMLanguageModel(nn.Module):
         self.output.weight = self.embedding.weight
 
     def forward(self, input_ids: torch.LongTensor, hidden=None):
-        # input_ids: (batch, seq_len)
-        emb = self.embedding(input_ids)  # (batch, seq_len, emb_dim)
-        out, hidden = self.lstm(emb, hidden)  # out: (batch, seq_len, hidden)
+        emb = self.embedding(input_ids)
+        out, hidden = self.lstm(emb, hidden)
         if self.emb_dim != self.hidden_dim:
             out = self.projection(out)
-        logits = self.output(out)  # (batch, seq_len, vocab)
+        logits = self.output(out)
         return logits, hidden
+
+class LSTMModelWrapper:
+    """
+    Wrapper class for LSTM Language Model to provide prediction interface.
+
+    This class encapsulates the LSTM model and provides a simplified interface
+    for making predictions on token sequences.
+
+    Attributes:
+        device (str): Device to run the model on ('cuda' or 'cpu').
+        model (LSTMLanguageModel): The underlying LSTM language model.
+        vocab_size (int): Size of the vocabulary.
+        seq_len (int): Maximum sequence length to consider for predictions.
+    """
+
+    def __init__(self, model: LSTMLanguageModel, seq_len: int = 64):
+        """
+        Initialize the LSTM model wrapper.
+
+        Args:
+            model: The LSTM language model to wrap.
+            seq_len: Maximum sequence length for context. Defaults to 64.
+        """
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = model
+        self.model.to(self.device)
+        self.model.eval()  # set model to the evaluation mode
+
+        self.vocab_size = self.model.vocab_size
+        self.seq_len = seq_len
+
+    def predict(self, context_tokens: List[int]) -> List[float]:
+        """
+        Predict probability distribution over next tokens given context.
+
+        Args:
+            context_tokens: List of token IDs representing the context.
+                           If empty, returns uniform distribution.
+
+        Returns:
+            List of probabilities for each token in vocabulary.
+            Length equals vocab_size.
+        """
+        if not context_tokens:
+            return [1.0 / self.vocab_size] * self.vocab_size
+        context_tokens = context_tokens[-self.seq_len :]
+        input_ids = torch.LongTensor([context_tokens]).to(self.device)
+        with torch.no_grad():
+            logits, _ = self.model(input_ids)
+            last_logits = logits[0, -1, :]
+            probs = torch.softmax(last_logits, dim=0)
+            return probs.cpu().tolist()
 
 
 def collate_batch(
     samples: List[Tuple[torch.LongTensor, torch.LongTensor]]
 ) -> Tuple[torch.LongTensor, torch.LongTensor]:
-    # all inputs should be same seq_len by construction; stack them
     inputs = torch.stack([s[0] for s in samples], dim=0)
     targets = torch.stack([s[1] for s in samples], dim=0)
     return inputs, targets
@@ -126,7 +174,6 @@ def train_epoch(
         targets = targets.to(device)
         optimizer.zero_grad()
         logits, _ = model(inputs)
-        # reshape: (batch*seq_len, vocab)
         b, s, v = logits.size()
         loss = criterion(logits.view(b * s, v), targets.view(-1))
         loss.backward()
@@ -136,6 +183,7 @@ def train_epoch(
         total_loss += loss.item()
         if step % log_steps == 0 and step > 0:
             pbar.set_postfix({"loss": total_loss / (step + 1)})
+
     return total_loss / (step + 1)
 
 
@@ -181,11 +229,21 @@ def compute_val_ppl(model: nn.Module, dataloader: DataLoader, device):
 
 
 def main():
+    # load general project config
     with open("next_token_prediction_model/config.yml") as f:
         config = yaml.safe_load(f)
 
-    random.seed(config["seed"])
-    np.random.seed(config["seed"])
+    # load model-specific config
+    with open("next_token_prediction_model/model_config.yml") as f:
+        model_config = yaml.safe_load(f)
+
+    # set seed to make the model training reproducible
+    seed = config.get("seed", 42)
+
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -196,13 +254,19 @@ def main():
     paths_file = config["train-paths-file"]
     offsets_file = config["train-offsets-file"]
 
-    tokenizer_model = config["tokenizer-prefix"] + ".model"
-    seq_len = config["seq-len"]
-    model_batch_size = config["model-batch-size"]
     n_workers = config["n-workers"]
-
-    initial_learning_rate = config["lr"]
     n_epochs = config["n-epochs"]
+
+    # get model hyperparameters
+    tokenizer = model_config["tokenizer"]
+    emb_dim = model_config["emb_dim"]
+    n_layers = model_config["n_layers"]
+    hidden_units = model_config["hidden_units"]
+    dropout = model_config["dropout"]
+    weight_decay = model_config["weight_decay"]
+    batch_size = model_config["batch_size"]
+    seq_len = model_config["seq_len"]
+    lr = model_config["lr"]
 
     for files, val_files in zip(
         get_files_paths(
@@ -220,38 +284,42 @@ def main():
     ):
 
         dataset = StreamingTextDataset(
-            files=files, sp_model_path=tokenizer_model, seq_len=seq_len
+            files=files, sp_model_path=tokenizer, seq_len=seq_len
         )
         dataloader = DataLoader(
             dataset,
-            batch_size=model_batch_size,
+            batch_size=batch_size,
             collate_fn=collate_batch,
             num_workers=n_workers,
         )
 
         val_dataset = StreamingTextDataset(
-            files=val_files, sp_model_path=tokenizer_model, seq_len=seq_len
+            files=val_files, sp_model_path=tokenizer, seq_len=seq_len
         )
         val_dataloader = DataLoader(
             val_dataset,
-            batch_size=model_batch_size,
+            batch_size=batch_size,
             collate_fn=collate_batch,
             num_workers=0,
         )
 
         # instantiate model
         sp_proc = spm.SentencePieceProcessor()
-        sp_proc.load(tokenizer_model)
+        sp_proc.load(tokenizer)
 
         model = LSTMLanguageModel(
             vocab_size=sp_proc.get_piece_size(),
-            emb_dim=512,
-            hidden_dim=512,
-            n_layers=3
+            emb_dim=emb_dim,
+            hidden_dim=hidden_units,
+            n_layers=n_layers,
+            dropout=dropout,
         ).to(device)
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=initial_learning_rate)
-
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=lr,
+            weight_decay=weight_decay,
+        )
 
         # training loop (sketch)
         best_val_loss = float("inf")
@@ -295,7 +363,7 @@ def main():
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "vocab_size": sp_proc.get_piece_size(),
-                "sp_model_path": tokenizer_model,
+                "sp_model_path": tokenizer,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
                 "history": history,

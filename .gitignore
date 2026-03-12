@@ -1,7 +1,7 @@
-# virtual environments
+# virtual environments and environment configs
 /**/venv
-/**/.env
 /**/.venv
+/**/.env
 
 # PyCharm directory
 .idea
@@ -25,6 +25,14 @@ next_token_prediction_model/utils/*.txt
 /**/*.model
 /**/*.binary
 
+# plots/visualizations
+*.png
+*.jpg
+*.jpeg
+
+# study results
+hyperparameter_analysis
+next_token_prediction_model/study_results
 
 
 
