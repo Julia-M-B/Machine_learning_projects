@@ -714,7 +714,7 @@ vulgarisms_regex = re.compile(vulgarismis_joined)
 mhm_regex = re.compile("m+h+m+")
 hm_regex = re.compile(r"\sh+m+\s")
 hy_regex = re.compile(r"y+h+|\s+(hy)+h+y+")
-hf_nesw_regex = re.compile("wieszwiecejpolub nas")
+hf_news_regex = re.compile("wieszwiecejpolub nas")
 
 letters = ascii_lowercase + "ąćęłńóśżź"
 
@@ -740,7 +740,7 @@ def clean(text: str):
     text = mhm_regex.sub("tak", text)
     text = hm_regex.sub("", text)
     text = hy_regex.sub("", text)
-    text = hf_nesw_regex.sub("", text)
+    text = hf_news_regex.sub("", text)
     lines = []
     for line in text.split("\n"):
         filtered_words = [
