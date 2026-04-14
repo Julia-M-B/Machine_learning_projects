@@ -7,7 +7,7 @@ import re
 import numpy as np
 
 CLEAN_REGEX = re.compile(r"[^a-ząćęłńóśźż0-9\s]")
-MULTIPLE_WHITESPACE = re.compile(r"[ \t]+")
+MULTIPLE_WHITESPACE = re.compile(r"[ \t\n]+")
 
 
 @dataclass(
