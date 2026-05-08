@@ -139,7 +139,7 @@ class WordPredictionBeamSearch:
             beam = heapq.nsmallest(self.beam_width, beam)
 
         # Continue until we have k completed words or beam is exhausted
-        while beam and len(completed_words) < k and iteration < max_iterations:
+        while beam and len(completed_words) < int(k * 1.5) and iteration < max_iterations:
             iteration += 1
 
             # Pop the most promising partial word (lowest neg_log_prob = highest prob)
@@ -290,7 +290,7 @@ class WordPredictionBeamSearch:
 
 def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
                          max_word_length: int = 5, device: str = None,
-                         alpha: float = 0.0, seq_len: int = 64):
+                         alpha: float = 0.0, seq_len: int = 64, model_name: str = "model.pt"):
     """
     Create a beam searcher with real model and tokenizer.
 
@@ -308,7 +308,8 @@ def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
 
     model, tokenizer = load_model_and_tokenizer(model_dir=model_dir,
                                                 device=device,
-                                                seq_len=seq_len)
+                                                seq_len=seq_len,
+                                                model_name=model_name)
 
     return WordPredictionBeamSearch(
         model=model,
