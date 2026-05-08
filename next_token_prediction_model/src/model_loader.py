@@ -5,7 +5,7 @@ import os
 import torch
 import torch.nn as nn
 import sentencepiece as spm
-from typing import List
+from typing import List, Optional, Any, Tuple
 
 
 class LSTMLanguageModel(nn.Module):
@@ -38,7 +38,8 @@ class LSTMLanguageModel(nn.Module):
 
 class LSTMModelWrapper:
     """
-    Wrapper for LSTM model that provides predict() method for beam search.
+    Wrapper for LSTM model that provides predict() and predict_with_state()
+    methods for use with the optimised beam search.
     """
     
     def __init__(self, model_path: str, device: str = None, seq_len: int = 64):
@@ -129,6 +130,59 @@ class LSTMModelWrapper:
             return probs.cpu().tolist()
 
 
+    def predict_with_state(
+            self,
+            new_tokens: List[int],
+            hidden: Optional[Any],
+    ) -> Tuple[List[float], Any]:
+        """
+        Run the model on `new_tokens` starting from `hidden`.
+
+        This is the key method for hidden-state prefix caching in the beam
+        search.  Instead of re-processing the full context on every call,
+        the caller passes in the cached hidden state from the previous step
+        and only the new tokens are processed.
+
+        Parameters
+        ----------
+        new_tokens : tokens to process in this call.
+                     When priming the context, this is the full context
+                     token list and hidden=None.
+                     During beam expansion, this is just the beam's token(s)
+                     appended since the last cache hit.
+        hidden     : LSTM hidden state (h_n, c_n) from a previous call, or
+                     None to start from scratch.
+
+        Returns
+        -------
+        probs      : List[float] of length vocab_size — next-token distribution
+        new_hidden : updated LSTM hidden state to cache for future calls
+        """
+        if not new_tokens:
+            # Nothing to process — return uniform distribution and pass
+            # hidden through unchanged.  This happens when the beam search
+            # asks for predictions at the context boundary.
+            if hidden is None:
+                return [1.0 / self.vocab_size] * self.vocab_size, None
+            # Re-run last step to get logits (hidden already advanced past it)
+            # Caller should avoid this case; handled defensively here.
+            return [1.0 / self.vocab_size] * self.vocab_size, hidden
+
+        # Trim so total seen tokens never exceed seq_len.
+        # (hidden already encodes everything before new_tokens, so we only
+        #  need to cap new_tokens itself in the extreme case of a very long
+        #  beam path — rare in practice with max_word_length <= 15.)
+        new_tokens = new_tokens[-self.seq_len:]
+        input_ids = torch.LongTensor([new_tokens]).to(self.device)
+
+        with torch.no_grad():
+            logits, new_hidden = self.model(input_ids, hidden)
+            # logits: (1, len(new_tokens), vocab_size)
+            # Read probabilities from the last token position
+            probs = torch.softmax(logits[0, -1, :], dim=0)
+            return probs.cpu().tolist(), new_hidden
+
+
 class SentencePieceTokenizer:
     """
     Wrapper for SentencePiece tokenizer.
@@ -144,8 +198,8 @@ class SentencePieceTokenizer:
         self.sp = spm.SentencePieceProcessor()
         self.sp.load(model_path)
         self.vocab_size = self.sp.get_piece_size()
-        self.id2piece = self._create_id_to_piece_mapping()
-        self.piece2id = self._create_piece_to_id_mapping()
+        self.id2piece = {i: self.id_to_piece(i) for i in range(self.vocab_size)}
+        self.piece2id = {v: k for k, v in self.id2piece.items()}
 
     def encode(self, text: str) -> List[int]:
         """
@@ -177,16 +231,11 @@ class SentencePieceTokenizer:
     def id_to_piece(self, token: int) -> str:
         return self.sp.id_to_piece(token)
 
-    def _create_id_to_piece_mapping(self) -> dict[int, str]:
-        id_piece_pairs = [(i, self.id_to_piece(i)) for i in range(self.vocab_size)]
-        return dict(id_piece_pairs)
+    def get_piece_size(self) -> int:
+        return self.sp.get_piece_size()
 
-    def _create_piece_to_id_mapping(self) -> dict[str, int]:
-        piece_id_pairs = [(self.id_to_piece(i), i) for i in
-                          range(self.vocab_size)]
-        return dict(piece_id_pairs)
 
-def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len: int = 64, model_name: str = "model.pt"):
+def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len: int = 256, model_name: str = "model.pt"):
     """
     Convenience function to load both model and tokenizer.
     
@@ -217,9 +266,18 @@ def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len:
 
 def main():
     model, tokenizer = load_model_and_tokenizer(".", device="cpu")
-    text2 = "witaj mam dziś gorszy dzień\nczy wszystko okej\nspoko ale przydałby się tlen\n"
-    # print(tokenizer.encode_as_pieces(text2))
-    print(tokenizer.encode(text2))
+
+    context = "witaj mam dziś gorszy dzień"
+    tokens = tokenizer.encode(context)
+    print(f"Context tokens: {tokens}")
+
+    # Test predict_with_state: prime context, then predict
+    probs, hidden = model.predict_with_state(tokens, hidden=None)
+    top5 = sorted(enumerate(probs), key=lambda x: x[1], reverse=True)[:5]
+    print("Top-5 next tokens (stateful):")
+    for tid, p in top5:
+        print(f"  {tokenizer.id_to_piece(tid)!r:20s}  {p:.4f}")
+
 
 if __name__ == "__main__":
     main()

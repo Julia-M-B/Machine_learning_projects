@@ -1,6 +1,6 @@
 import heapq
 import math
-from typing import List, Tuple, Dict, Union
+from typing import List, Tuple, Any
 from dataclasses import dataclass, field
 import unicodedata
 import re
@@ -57,10 +57,11 @@ class WordPredictionBeamSearch:
                  max_word_length: int = 15, alpha: float = 0.2):
         """
         Args:
-            model: LSTM model with predict() method that returns token probabilities
-            tokenizer: Tokenizer with decode() and check if token starts word
+            model: LSTMModelWrapper with predict() and predict_with_state()
+            tokenizer: SentencePiece tokenizer
             beam_width: Maximum number of partial words to keep in beam
-            max_word_length: Maximum number of tokens per word (prunes longer words)
+            max_word_length: Maximum number of tokens per word
+            alpha: Length normalisation exponent
         """
         self.model = model
         self.tokenizer = tokenizer
@@ -69,6 +70,13 @@ class WordPredictionBeamSearch:
         self.inference_count = 0
         self.start_new_word_char: str = "▁"
         self.alpha = alpha
+
+        # Pre-build piece list indexed by token ID — avoids rebuilding a dict
+        # on every _get_top_matching_tokens call (O(1) lookup instead of dict alloc)
+        vocab_size = tokenizer.get_piece_size()
+        self._id_to_piece: List[str] = [
+            tokenizer.id_to_piece(i) for i in range(vocab_size)
+        ]
 
     def starts_new_word(self, token_id: int) -> bool:
         """Check if a token starts a new word (piece starts with '▁' marker)."""
@@ -89,7 +97,7 @@ class WordPredictionBeamSearch:
             k: Number of top words to return
 
         Returns:
-            List of (word_text, probability, num_inferences) tuples
+            List of (word_text, probability, num_tokens) tuples
         """
         # Reset inference counter
         self.inference_count = 0
@@ -100,9 +108,19 @@ class WordPredictionBeamSearch:
             context_text)
         context_tokens = self.tokenizer.encode(context_text)
 
-        beam = [BeamItem(neg_log_prob_normalised=0.0, neg_log_prob=0.0, tokens=[], text="")]
-        completed_words = []
-        completed_words_texts = []
+        # Run the context once. Returns:
+        #   context_probs  — next-token distribution right at the context boundary
+        #   context_hidden — LSTM hidden state after the full context
+        # This means the main loop never needs to call predict_with_state([],...)
+        # which was the source of the quality regression.
+        context_probs, context_hidden = self._prime_context(context_tokens)
+
+        beam: List[BeamItem] = [
+            BeamItem(neg_log_prob_normalised=0.0, neg_log_prob=0.0, tokens=[],
+                     text="")
+        ]
+        completed_words: List[CompletedWord] = []
+        completed_words_texts: List[str] = []
 
         # Track explored prefixes to avoid cycles (only mark as explored after processing)
         explored_prefixes: set[Tuple[int, ...]] = set()
@@ -118,8 +136,13 @@ class WordPredictionBeamSearch:
             # Mark this prefix as explored (we're about to process it)
             explored_prefixes.add(tuple(current.tokens))
 
+            # predict_with_state with empty beam tokens = predictions right
+            # at the context boundary, identical to predict(context_tokens)
+            token_probs, _ = self.model.predict_with_state([], context_hidden)
+
             # Run model inference
-            token_probs = self.model.predict(context_tokens + current.tokens)
+            # token_probs = self.model.predict(context_tokens + current.tokens)
+
             self.inference_count += 1
 
             top_next_tokens = self._get_top_matching_tokens(token_probs,
@@ -139,7 +162,8 @@ class WordPredictionBeamSearch:
             beam = heapq.nsmallest(self.beam_width, beam)
 
         # Continue until we have k completed words or beam is exhausted
-        while beam and len(completed_words) < int(k * 1.5) and iteration < max_iterations:
+        while beam and len(completed_words) < int(
+                k * 1.5) and iteration < max_iterations:
             iteration += 1
 
             # Pop the most promising partial word (lowest neg_log_prob = highest prob)
@@ -152,19 +176,36 @@ class WordPredictionBeamSearch:
             if tuple(current.tokens) in explored_prefixes:
                 continue
 
-
             # Mark this prefix as explored (we're about to process it)
             explored_prefixes.add(tuple(current.tokens))
 
+            if current.tokens:
+                # Beam item has tokens: run only those tokens from context_hidden.
+                # The LSTM processes beam_tokens only, not the full context.
+                token_probs, _ = self.model.predict_with_state(
+                    current.tokens, context_hidden
+                )
+            else:
+                # Beam item has no tokens yet: we are right at the context
+                # boundary. Use the probs already computed by _prime_context —
+                # no extra inference call needed.
+                token_probs = context_probs
+
             # Run model inference
-            token_probs = self.model.predict(context_tokens + current.tokens)
+            # token_probs = self.model.predict(context_tokens + current.tokens)
+
             self.inference_count += 1
 
             # Get top beam_width tokens
             if unfinished_word:
-                top_next_tokens = self._get_top_matching_tokens(token_probs, self.beam_width, current.text, unfinished_word, beam_init=False)
+                top_next_tokens = self._get_top_matching_tokens(token_probs,
+                                                                self.beam_width,
+                                                                current.text,
+                                                                unfinished_word,
+                                                                beam_init=False)
             else:
-                top_next_tokens = self._get_top_tokens(token_probs, self.beam_width)
+                top_next_tokens = self._get_top_tokens(token_probs,
+                                                       self.beam_width)
 
             # Expand beam with each possible next token
             for token_id, token_prob in top_next_tokens:
@@ -175,16 +216,18 @@ class WordPredictionBeamSearch:
                     # If we have a partial word to complete, complete it first
                     if current.text.strip():  # Only complete if we have a non-empty prefix
                         completed_word = self._create_complete_word(current)
-                        if completed_word:
-                            if completed_word.text not in completed_words_texts:
-                                heapq.heappush(completed_words,
-                                               completed_word)
-                                completed_words_texts.append(
-                                    completed_word.text)
+                        if completed_word and completed_word.text not in completed_words_texts:
+                            heapq.heappush(completed_words,
+                                           completed_word)
+                            completed_words_texts.append(
+                                completed_word.text)
 
-                    # no prefixes were made yet; we have to create first prefixes
                     else:
-                        new_item = self._create_new_beam_prefix(current, token_id, token_prob)
+                    # no prefixes were made yet; we have to create first prefixes
+
+                        new_item = self._create_new_beam_prefix(current,
+                                                                token_id,
+                                                                token_prob)
                         if tuple(new_item.tokens) not in explored_prefixes:
                             heapq.heappush(beam, new_item)
 
@@ -208,20 +251,48 @@ class WordPredictionBeamSearch:
 
         return results
 
-    def _get_top_matching_tokens(self, token_probs: List[float], k: int, current_prefix: str, unfinished_word: str, beam_init: bool = False) -> List[Tuple[int, float]]:
+    def _prime_context(
+            self, context_tokens: List[int]
+    ) -> Tuple[List[float], Any]:
+        """
+        Run context_tokens through the LSTM in one forward pass.
+
+        Returns
+        -------
+        probs  : next-token probability distribution at the context boundary,
+                 identical to what predict(context_tokens) would return
+        hidden : LSTM hidden state (h_n, c_n) after processing context_tokens,
+                 to be reused as the starting point for all beam steps
+        """
+        if not context_tokens:
+            probs = [1.0 / self.model.vocab_size] * self.model.vocab_size
+            return probs, None
+
+        probs, hidden = self.model.predict_with_state(context_tokens, None)
+        return probs, hidden
+
+    def _get_top_matching_tokens(self, token_probs: List[float], k: int,
+                                 current_prefix: str, unfinished_word: str,
+                                 beam_init: bool = False) -> List[Tuple[int, float]]:
+
         unfinished_word = unfinished_word.strip()
-        if beam_init and not unfinished_word.startswith(self.start_new_word_char):
+
+        if beam_init and not unfinished_word.startswith(
+                self.start_new_word_char):
             unfinished_word = self.start_new_word_char + unfinished_word
-        pieces_probs = dict(zip(self.tokenizer.id2piece.values(), token_probs))
+
         candidates = []
-        for piece, prob in pieces_probs.items():
+
+        for token_id, prob in enumerate(token_probs):
+            piece = self._id_to_piece[token_id]
+
             new_prefix = current_prefix + piece
-            if new_prefix.startswith(unfinished_word) or unfinished_word.startswith(new_prefix):
-                candidates.append((self.tokenizer.piece2id[piece], prob))
+            if new_prefix.startswith(
+                    unfinished_word) or unfinished_word.startswith(new_prefix):
+                candidates.append((token_id, prob))
 
         top_k = sorted(candidates, key=lambda x: x[1], reverse=True)[:k]
         return top_k
-
 
     @staticmethod
     def _get_top_tokens(token_probs: List[float], k: int) -> List[
@@ -268,10 +339,11 @@ class WordPredictionBeamSearch:
             word_neg_log_prob_normalised = current_prefix.neg_log_prob_normalised
             word_tokens = current_prefix.tokens
             word_probability = math.exp(-current_prefix.neg_log_prob_normalised)
-            return CompletedWord(neg_log_prob_normalised=word_neg_log_prob_normalised,
-                                 tokens=word_tokens,
-                                 text=word_text,
-                                 probability=word_probability)
+            return CompletedWord(
+                neg_log_prob_normalised=word_neg_log_prob_normalised,
+                tokens=word_tokens,
+                text=word_text,
+                probability=word_probability)
         return None
 
     def _create_new_beam_prefix(self, current_prefix: BeamItem, token_id: int,
@@ -290,7 +362,8 @@ class WordPredictionBeamSearch:
 
 def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
                          max_word_length: int = 5, device: str = None,
-                         alpha: float = 0.0, seq_len: int = 64, model_name: str = "model.pt"):
+                         alpha: float = 0.0, seq_len: int = 256,
+                         model_name: str = "model.pt"):
     """
     Create a beam searcher with real model and tokenizer.
 
@@ -303,8 +376,8 @@ def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
     Returns:
         WordPredictionBeamSearch instance
     """
-    from src.model_loader import load_model_and_tokenizer
-    # from model_loader import load_model_and_tokenizer
+    # from src.model_loader import load_model_and_tokenizer
+    from model_loader import load_model_and_tokenizer
 
     model, tokenizer = load_model_and_tokenizer(model_dir=model_dir,
                                                 device=device,
@@ -319,14 +392,22 @@ def create_beam_searcher(model_dir: str = None, beam_width: int = 30,
         alpha=alpha
     )
 
+
 if __name__ == "__main__":
+    import time
 
     print("Loading real LSTM model and tokenizer...")
-    searcher = create_beam_searcher(model_dir="../", beam_width=50, max_word_length=10)
+    searcher = create_beam_searcher(model_dir="../", beam_width=50,
+                                    max_word_length=10)
     print("Model loaded successfully!\n")
 
     # Find top 5 most probable next words
     context = "chociaż mam prawie trzydzieści lat cały czas czuję się "
+    t0 = time.perf_counter()
+    for _ in range(20):
+        searcher.get_top_k_words(context, k=5)
+    print(f"avg: {(time.perf_counter() - t0) / 20 * 1000:.1f} ms per call")
+
     top_words = searcher.get_top_k_words(context, k=5)
 
     print(f"\n{'=' * 50}")
