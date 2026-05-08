@@ -186,7 +186,7 @@ class SentencePieceTokenizer:
                           range(self.vocab_size)]
         return dict(piece_id_pairs)
 
-def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len: int = 64):
+def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len: int = 64, model_name: str = "model.pt"):
     """
     Convenience function to load both model and tokenizer.
     
@@ -202,7 +202,7 @@ def load_model_and_tokenizer(model_dir: str = None, device: str = None, seq_len:
         # Get directory of this file
         model_dir = os.path.dirname(os.path.abspath(__file__))
     
-    model_path = os.path.join(model_dir, 'model.pt')
+    model_path = os.path.join(model_dir, model_name)
     tokenizer_path = os.path.join(model_dir, 'spm_pl.model')
     
     if not os.path.exists(model_path):

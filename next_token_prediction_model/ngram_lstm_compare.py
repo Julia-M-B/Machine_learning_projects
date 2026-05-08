@@ -1,10 +1,10 @@
-import random
-
 import numpy as np
 from typing import List, Tuple, Dict
 import json
 from abc import ABC, abstractmethod
 import time
+
+import yaml
 
 
 class NextTokenPredictor(ABC):
@@ -47,6 +47,7 @@ class NGramPredictor(NextTokenPredictor):
 
         # sortuj wg częstości (logprob ~ częstotliwość)
         vocab.sort(reverse=True)
+        print("Original vocabulary size:\t", len(vocab))
         vocab = [w for _, w in vocab[:max_vocab]]
         return vocab
 
@@ -103,7 +104,10 @@ class NGramPredictor(NextTokenPredictor):
 
 
 class LSTMPredictor(NextTokenPredictor):
-    def __init__(self, model_dir: str, beam_width: int = 50, max_word_length: int = 10, device: str = None, alpha: float = 0.0, seq_len: int = 64):
+    def __init__(self, model_dir: str, beam_width: int = 20,
+                 max_word_length: int = 10, device: str = None,
+                 alpha: float = 0.0, seq_len: int = 256,
+                 model_name: str = "model.pt"):
         from src.beam_search import create_beam_searcher
         import torch
 
@@ -114,6 +118,7 @@ class LSTMPredictor(NextTokenPredictor):
                                              device=device,
                                              alpha=alpha,
                                              seq_len=seq_len,
+                                             model_name=model_name
                                              )
 
 
@@ -128,7 +133,7 @@ class LSTMPredictor(NextTokenPredictor):
 
 
 class ModelEvaluator:
-    def __init__(self, models: Dict[str, NextTokenPredictor], seq_len: int = 50):
+    def __init__(self, models: Dict[str, NextTokenPredictor], seq_len: int = 100):
         self.models = models
         self.seq_len = seq_len
         self.results = {name: {
@@ -204,25 +209,24 @@ class ModelEvaluator:
         return read_by_index(indices.tolist(), paths_file,
                                 offsets_file)
 
-    def evaluate_directory(self):
+    def evaluate_directory(self, test_indices: np.ndarray[int], paths_file: str,
+                           offsets_file: str, output_path: str,
+                           save_every: int = 50) -> None:
         from tqdm import tqdm
-        import yaml
         import random
-
-
-        with open("next_token_prediction_model/config.yml") as f:
-            config = yaml.safe_load(f)
-
-        test_indices = np.load(config["test-indices-file"])
-        paths_file = config["train-paths-file"]
-        offsets_file = config["train-offsets-file"]
 
         files = self.get_files_paths(test_indices, paths_file, offsets_file)
         random.shuffle(files)
-        files = files[:100]
+        files = files[:1000]
 
+        count = 0
         for file in tqdm(files, desc="Evaluating files"):
             self.evaluate_file(file)
+            count += 1
+            if count % save_every == 0:
+                # self.print_comparison()
+                self.save_results(output_path)
+
 
     def _calculate_mrr(self, predictions: List[str], true_token: str) -> float:
         try:
@@ -310,79 +314,124 @@ class ModelEvaluator:
 
 
 if __name__ == "__main__":
+    with open("next_token_prediction_model/config.yml") as f:
+        config = yaml.safe_load(f)
+
+    test_indices = np.load(config["test-indices-file"])
+    paths_file = config["train-paths-file"]
+    offsets_file = config["train-offsets-file"]
+
+    conversations_test_indices = np.load(
+        config["conversations-test-indices-file"])
+    conversations_paths_file = config["conversations-test-paths-file"]
+    conversations_offsets_file = config["conversations-test-offsets-file"]
+
     # Inicjalizuj modele
     ngram_model = NGramPredictor(
-        model_name="next_token_prediction_model/ngram/model_3gram",
-        vocab_size=100_000
+        model_name="model_3gram",
+        vocab_size=200_000
     )
 
-    lstm_model_alpha0 = LSTMPredictor(
-        model_dir="next_token_prediction_model/",
-        beam_width=25,
-        max_word_length=10,
-        device="cpu",
-        alpha=0.0
-    )
+    # lstm_model_alpha0 = LSTMPredictor(
+    #     model_dir=".",
+    #     beam_width=25,
+    #     max_word_length=10,
+    #     device="cpu",
+    #     alpha=0.0
+    # )
 
     lstm_model_alpha2 = LSTMPredictor(
-        model_dir="next_token_prediction_model/",
+        model_dir=".",
         beam_width=25,
         max_word_length=10,
         device="cpu",
-        alpha=0.2
+        alpha=0.2,
+        model_name="model.pt"
     )
 
-    lstm_model_alpha4 = LSTMPredictor(
-        model_dir="next_token_prediction_model/",
+    fine_tuned_lstm_model = LSTMPredictor(
+        model_dir=".",
         beam_width=25,
         max_word_length=10,
         device="cpu",
-        alpha=0.4
+        alpha=0.2,
+        model_name="fine_tuned_model.pt"
     )
 
-    lstm_model_alpha6 = LSTMPredictor(
-        model_dir="next_token_prediction_model/",
-        beam_width=25,
-        max_word_length=10,
-        device="cpu",
-        alpha=0.6
-    )
-
-    lstm_model_alpha8 = LSTMPredictor(
-        model_dir="next_token_prediction_model/",
-        beam_width=25,
-        max_word_length=10,
-        device="cpu",
-        alpha=0.8
-    )
-
-    lstm_model_alpha10 = LSTMPredictor(
-        model_dir="next_token_prediction_model/",
-        beam_width=25,
-        max_word_length=10,
-        device="cpu",
-        alpha=1.0
-    )
+    # lstm_model_alpha4 = LSTMPredictor(
+    #     model_dir=".",
+    #     beam_width=20,
+    #     max_word_length=10,
+    #     device="cpu",
+    #     alpha=0.4
+    # )
+    #
+    # lstm_model_alpha6 = LSTMPredictor(
+    #     model_dir=".",
+    #     beam_width=20,
+    #     max_word_length=10,
+    #     device="cpu",
+    #     alpha=0.6
+    # )
+    #
+    # lstm_model_alpha8 = LSTMPredictor(
+    #     model_dir=".",
+    #     beam_width=20,
+    #     max_word_length=10,
+    #     device="cpu",
+    #     alpha=0.8
+    # )
+    #
+    # lstm_model_alpha10 = LSTMPredictor(
+    #     model_dir=".",
+    #     beam_width=20,
+    #     max_word_length=10,
+    #     device="cpu",
+    #     alpha=1.0
+    # )
 
     # Stwórz evaluator
     models = {
         'n-gram': ngram_model,
-        'lstm0': lstm_model_alpha0,
+        # 'lstm0': lstm_model_alpha0,
         'lstm2': lstm_model_alpha2,
-        'lstm4': lstm_model_alpha4,
-        'lstm6': lstm_model_alpha6,
-        'lstm8': lstm_model_alpha8,
-        'lstm10': lstm_model_alpha10,
+        'ft_lstm2': fine_tuned_lstm_model,
+        # 'lstm4': lstm_model_alpha4,
+        # 'lstm6': lstm_model_alpha6,
+        # 'lstm8': lstm_model_alpha8,
+        # 'lstm10': lstm_model_alpha10,
     }
 
     evaluator = ModelEvaluator(models)
 
     # Uruchom ewaluację
     print("Rozpoczynam ewaluację...")
-    evaluator.evaluate_directory()
+    # evaluator.evaluate_directory(
+    #     test_indices=test_indices,
+    #     paths_file=paths_file,
+    #     offsets_file=offsets_file,
+    #     output_path="comparison_results_written.json"
+    # )
+    #
+    # # Wyświetl wyniki
+    # evaluator.print_comparison()
+    #
+    # # Zapisz do pliku
+    # evaluator.save_results("comparison_results_written.json")
+
+
+    ##############################
+    # Compare against conversational dataset
+
+    evaluator.evaluate_directory(
+        test_indices=conversations_test_indices,
+        paths_file=conversations_paths_file,
+        offsets_file=conversations_offsets_file,
+        output_path="comparison_results_conversations.json"
+    )
 
     # Wyświetl wyniki
     evaluator.print_comparison()
 
     # Zapisz do pliku
-    evaluator.save_results("comparison_results_16k_2.json")
+    evaluator.save_results("comparison_results_conversations.json")

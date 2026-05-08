@@ -61,3 +61,7 @@ hyperparameters-ratio: 0.25
 
 n-workers: 4
 n-epochs: 30
+
+# fine-tuning configurations
+ft-epochs: 3
+ft-lr: 0.00005
